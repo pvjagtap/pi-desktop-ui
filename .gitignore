@@ -1,0 +1,5 @@
+node_modules/
+.rag-index/
+.history/
+test-dummy.txt
+*.log

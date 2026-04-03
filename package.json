@@ -1,0 +1,19 @@
+{
+  "name": "pi-desktop-ui",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "glimpseui": "^0.6.0",
+    "marked": "^17.0.5",
+    "ws": "^8.20.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  }
+}
