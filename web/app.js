@@ -4,64 +4,68 @@
 
 let data = {};
 try {
-  const raw = document.getElementById("desktop-data").textContent || "{}";
-  data = JSON.parse(raw);
+  // Data is base64-encoded in the template to avoid Glimpse bridge corruption.
+  var b64 = (document.getElementById("desktop-data").textContent || "").trim();
+  if (b64) {
+    var bytes = Uint8Array.from(atob(b64), function(c) { return c.charCodeAt(0); });
+    var jsonStr = new TextDecoder().decode(bytes);
+    data = JSON.parse(jsonStr);
+  }
 } catch (e) {
-  console.error("[desktop] Failed to parse desktop-data JSON:", e);
-  // Recovery: escape ALL raw control characters (0x00-0x1F) as \uXXXX inside JSON strings.
-  // The Glimpse webview bridge may corrupt/unescape these during transfer.
+  console.error("[desktop] Failed to decode/parse desktop-data:", e);
+  // Fallback: try direct parse (in case data is raw JSON, not base64)
   try {
-    const raw = (document.getElementById("desktop-data").textContent || "{}")
-      .replace(/[\x00-\x1f]/g, function(ch) {
-        return '\\u' + ('0000' + ch.charCodeAt(0).toString(16)).slice(-4);
-      });
+    var raw = document.getElementById("desktop-data").textContent || "{}";
     data = JSON.parse(raw);
-    console.log("[desktop] Recovery parse succeeded after escaping control chars");
-  } catch (e2) { console.error("[desktop] Recovery parse also failed:", e2); }
+  } catch (e2) { console.error("[desktop] Fallback parse also failed:", e2); }
 }
 
-// ─── Mermaid (beautiful-mermaid) ──────────────────────────────
+// ─── Mermaid (mermaid.js) ─────────────────────────────────
 
-let _renderMermaidSVG = null;
-let _mermaidLoading = null;
+let _mermaidReady = false;
+let _mermaidCounter = 0;
 
-function loadMermaid() {
-  if (_renderMermaidSVG) return Promise.resolve();
-  if (_mermaidLoading) return _mermaidLoading;
-  _mermaidLoading = new Promise(function(resolve) {
-    // Check if already loaded via <script type="module"> in head
-    if (window.__beautifulMermaid && window.__beautifulMermaid.renderMermaidSVG) {
-      _renderMermaidSVG = window.__beautifulMermaid.renderMermaidSVG;
-      resolve();
-      return;
-    }
-    // Wait for the module script to load and set the global
-    window.addEventListener('mermaid-loaded', function() {
-      if (window.__beautifulMermaid && window.__beautifulMermaid.renderMermaidSVG) {
-        _renderMermaidSVG = window.__beautifulMermaid.renderMermaidSVG;
-      }
-      resolve();
-    }, { once: true });
-    // Timeout fallback — don't block forever
-    setTimeout(function() { resolve(); }, 15000);
+function initMermaid() {
+  if (typeof mermaid === 'undefined') return;
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'neutral',
+    securityLevel: 'strict',
+    fontFamily: 'ui-sans-serif, system-ui, sans-serif',
   });
-  return _mermaidLoading;
+  _mermaidReady = true;
 }
 
-// Start loading immediately (safe — errors are caught)
-try {
-  loadMermaid().then(function() {
-    // Re-render any pending mermaid blocks once loaded
-    if (_renderMermaidSVG) {
-      document.querySelectorAll('.mermaid-pending').forEach(function(el) {
-        var code = el.dataset.mermaidSrc;
-        if (code) {
-          el.outerHTML = renderMermaidBlock(code);
-        }
-      });
-    }
+initMermaid();
+
+function renderMermaidAsync(el) {
+  if (!_mermaidReady || !el) return;
+  var code = el.dataset.mermaidSrc;
+  if (!code) return;
+  var id = 'mermaid-svg-' + (++_mermaidCounter);
+  mermaid.render(id, code).then(function(result) {
+    el.innerHTML = result.svg;
+    el.classList.remove('mermaid-pending');
+    el.classList.add('mermaid-rendered');
+  }).catch(function() {
+    el.innerHTML = '<pre style="text-align:left;margin:0;background:var(--code-bg);border-radius:6px;"><code style="white-space:pre-wrap;word-break:break-word;">' + escapeHtml(code) + '</code></pre>';
+    el.classList.remove('mermaid-pending');
+    el.classList.add('mermaid-rendered');
   });
-} catch(e) { console.warn('Mermaid init error:', e); }
+}
+
+function renderAllPendingMermaid() {
+  document.querySelectorAll('.mermaid-pending').forEach(renderMermaidAsync);
+}
+
+// ─── Render Cache ──────────────────────────────────────────
+// Cache rendered HTML for messages to avoid expensive re-processing
+var _renderCache = new Map(); // key: message content hash → rendered HTML
+
+function getMsgCacheKey(msg) {
+  // Simple cache key from role + content (fast string concat)
+  return msg.role + '||' + (msg.content || '') + '||' + (msg.toolName || '') + '||' + (msg.status || '') + '||' + (msg.isError ? '1' : '0');
+}
 
 // ─── State ────────────────────────────────────────────────────
 
@@ -104,6 +108,23 @@ const iconSun = document.getElementById("icon-sun");
 const btnSend = document.getElementById("btn-send");
 const btnNewThread = document.getElementById("btn-new-thread");
 const navItems = document.querySelectorAll("[data-nav]");
+
+// Auto-render mermaid diagrams when new content is added (disabled during streaming)
+var _mermaidObserver = null;
+var _mermaidDebounceTimer = null;
+function startMermaidObserver() {
+  if (_mermaidObserver || !messagesEl) return;
+  _mermaidObserver = new MutationObserver(function() {
+    if (_mermaidDebounceTimer) clearTimeout(_mermaidDebounceTimer);
+    _mermaidDebounceTimer = setTimeout(renderAllPendingMermaid, 100);
+  });
+  _mermaidObserver.observe(messagesEl, { childList: true, subtree: true });
+}
+function stopMermaidObserver() {
+  if (_mermaidObserver) { _mermaidObserver.disconnect(); _mermaidObserver = null; }
+}
+// Start observer only when not streaming
+if (!state.isStreaming) startMermaidObserver();
 
 // ─── Markdown Setup ──────────────────────────────────────────
 
@@ -200,9 +221,11 @@ function renderMarkdown(text) {
         return 'TRUSTED_BLOCK_' + idx;
       });
 
-      // 4. Syntax highlighting for code blocks
+      // 4. Syntax highlighting for code blocks (skip mermaid)
       if (typeof hljs !== "undefined") {
         html = html.replace(/<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g, function(match, lang, code) {
+          if (lang === 'mermaid') return match; // already extracted above, but guard just in case
+          if (!hljs.getLanguage(lang)) return match; // skip unknown languages
           try {
             var decoded = code.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
             var highlighted = hljs.highlight(decoded, { language: lang }).value;
@@ -234,27 +257,11 @@ function renderMarkdown(text) {
 }
 
 function renderMermaidBlock(code) {
-  if (!_renderMermaidSVG) {
-    // Not loaded yet — return placeholder with raw code
-    return '<div class="mermaid-container mermaid-pending" data-mermaid-src="' + escapeHtml(code) + '">'
-      + '<pre style="text-align:left;"><code class="language-mermaid">' + escapeHtml(code) + '</code></pre>'
-      + '<div style="font-size:12px;color:var(--text-dim);margin-top:8px;">Loading mermaid renderer...</div>'
-      + '</div>';
-  }
-  try {
-    const isDark = state.theme === 'dark';
-    const svg = _renderMermaidSVG(code, {
-      bg: isDark ? '#1a1714' : '#f8f4ef',
-      fg: isDark ? '#e0ddd8' : '#2d2a26',
-      transparent: true,
-    });
-    return '<div class="mermaid-container">' + svg + '</div>';
-  } catch (err) {
-    return '<div class="mermaid-container">'
-      + '<pre style="text-align:left;"><code class="language-mermaid">' + escapeHtml(code) + '</code></pre>'
-      + '<div class="mermaid-error">Diagram error: ' + escapeHtml(err.message || String(err)) + '</div>'
-      + '</div>';
-  }
+  // Always return a pending placeholder — mermaid.render() is async
+  // and will fill in the SVG after DOM insertion.
+  return '<div class="mermaid-container mermaid-pending" data-mermaid-src="' + escapeHtml(code) + '">'
+    + '<pre style="text-align:left;padding:16px;"><code>' + escapeHtml(code) + '</code></pre>'
+    + '</div>';
 }
 
 function renderLatex(formula, displayMode) {
@@ -391,7 +398,7 @@ function renderProjectTree() {
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-pi-text-muted" style="flex-shrink:0">
         <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
       </svg>
-      <span class="font-medium" style="color:var(--text);">${escapeHtml(data.projectName)}</span>${branch}
+      <span class="font-medium" style="color:var(--text);">${escapeHtml(data.projectName || "")}</span>${branch}
     </div>
   `;
 
@@ -423,8 +430,9 @@ function renderProjectTree() {
   }
 
   // ─── Other workspaces ─────────────────────────────────────
-  const visibleWs = workspaces.filter(ws => ws.path !== data.cwd && !state.hiddenWorkspaces[ws.dirName]);
-  const hiddenWs = workspaces.filter(ws => ws.path !== data.cwd && state.hiddenWorkspaces[ws.dirName]);
+  const cwd = data.cwd || "";
+  const visibleWs = workspaces.filter(ws => ws.path !== cwd && !state.hiddenWorkspaces[ws.dirName]);
+  const hiddenWs = workspaces.filter(ws => ws.path !== cwd && state.hiddenWorkspaces[ws.dirName]);
 
   for (const ws of visibleWs) {
     const isExpanded = !!state.expandedWorkspaces[ws.dirName];
@@ -617,7 +625,7 @@ function renderHiddenWorkspacesBar(hiddenWs) {
   bar.id = "hidden-ws-bar";
   bar.style.cssText = "border-top:1px solid var(--border);padding:4px 8px;flex-shrink:0;";
   bar.innerHTML = `
-    <div class="flex items-center gap-2 px-3 py-2 text-[12px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md sidebar-expanded-only" style="color:var(--text-dim);">
+    <div class="flex items-center gap-2 px-3 py-2 text-[12px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md sidebar-expanded-only" style="color:var(--text-muted);">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;">
         <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
       </svg>
@@ -654,7 +662,7 @@ function renderHiddenWorkspacesBar(hiddenWs) {
     let popHtml = '<div style="padding:4px 8px 6px;font-size:11px;font-weight:600;color:var(--text-dim);">Hidden workspaces</div>';
     for (const ws of hiddenWs) {
       popHtml += `
-        <div class="flex items-center gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md" style="color:var(--text-muted);opacity:0.55;transition:opacity 0.15s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.55'" data-unhide-ws="${escapeHtml(ws.dirName)}">
+        <div class="flex items-center gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md" style="color:var(--text-muted);opacity:0.75;transition:opacity 0.15s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.75'" data-unhide-ws="${escapeHtml(ws.dirName)}">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
@@ -734,8 +742,15 @@ function renderBreadcrumb() {
 // ─── Messages Rendering ──────────────────────────────────────
 
 function renderMessageHtml(msg) {
+  // Check cache first (skip for running tools since they update)
+  var cacheKey = getMsgCacheKey(msg);
+  if (msg.status !== 'running' && _renderCache.has(cacheKey)) {
+    return _renderCache.get(cacheKey);
+  }
+
+  var result;
   if (msg.role === "user") {
-    return `
+    result = `
       <div class="msg-animate mb-4 flex justify-end">
         <div class="max-w-[75%] rounded-2xl px-4 py-3 text-[14px]" style="background:var(--user-bubble);">
           ${escapeHtml(msg.content)}
@@ -743,7 +758,7 @@ function renderMessageHtml(msg) {
       </div>
     `;
   } else if (msg.role === "assistant") {
-    return `
+    result = `
       <div class="msg-animate mb-5">
         <div class="message-content text-[14.5px] leading-relaxed" style="color:var(--text);">
           ${renderMarkdown(msg.content)}
@@ -752,7 +767,7 @@ function renderMessageHtml(msg) {
     `;
   } else if (msg.role === "thinking") {
     // Persisted thinking block — always collapsed
-    return `
+    result = `
       <div class="msg-animate mb-3">
         <details class="rounded-lg border" style="border-color: var(--border);">
           <summary class="cursor-pointer px-3 py-2 text-[12px] font-medium" style="color: var(--text-muted);">
@@ -813,7 +828,7 @@ function renderMessageHtml(msg) {
       `;
     }
 
-    return `
+    result = `
       <div class="msg-animate mb-3">
         <details class="rounded-lg border" style="border-color: var(--border);" ${isRunning || hasEditDiffs ? 'open' : ''}>
           <summary class="cursor-pointer px-3 py-2 text-[12px] font-medium flex items-center gap-2" style="color: var(--text-muted);">
@@ -826,7 +841,10 @@ function renderMessageHtml(msg) {
       </div>
     `;
   }
-  return "";
+  if (result && msg.status !== 'running') {
+    _renderCache.set(cacheKey, result);
+  }
+  return result || "";
 }
 
 function getToolIcon(toolName) {
@@ -1592,9 +1610,29 @@ inputTextEl.addEventListener("keydown", (e) => {
     hideCommandSuggestions();
     sendMessage();
   }
+
+  // Escape cancels streaming when not in suggestions
+  if (e.key === "Escape" && !suggestionsVisible && state.isStreaming) {
+    e.preventDefault();
+    cancelStreaming();
+  }
 });
 
-btnSend.addEventListener("click", sendMessage);
+// Global Escape / Ctrl+C to cancel streaming
+document.addEventListener("keydown", function(e) {
+  if (e.key === "Escape" && state.isStreaming) {
+    e.preventDefault();
+    cancelStreaming();
+  }
+  if (e.key === "c" && e.ctrlKey && state.isStreaming) {
+    e.preventDefault();
+    cancelStreaming();
+  }
+});
+
+btnSend.addEventListener("click", function() {
+  if (state.isStreaming) { cancelStreaming(); } else { sendMessage(); }
+});
 
 // ─── Attach Button ─────────────────────────────────────────────
 
@@ -1820,6 +1858,7 @@ window.__desktopReceive = function(message) {
       state.isStreaming = true;
       state.streamingText = "";
       state.activeTools = [];
+      stopMermaidObserver();
       if (state.activeView === "threads" && !state.viewingOldThread) showWaitingIndicator();
       updateStreamingUI();
       break;
@@ -1828,6 +1867,7 @@ window.__desktopReceive = function(message) {
       state.isStreaming = false;
       state.activeTools = [];
       removeEphemeralElements();
+      startMermaidObserver();
       updateStreamingUI();
       inputTextEl.disabled = false;
       btnSend.disabled = false;
@@ -2093,14 +2133,23 @@ function showPlanModeWarning(toolName, argsPreview) {
 
 // ─── Streaming UI Updates ─────────────────────────────────────
 
+function cancelStreaming() {
+  if (!state.isStreaming) return;
+  send({ type: "cancel-streaming" });
+}
+
 function updateStreamingUI() {
-  // Update send button state
+  // Update send button: show cancel (stop) button while streaming
   if (state.isStreaming) {
-    btnSend.innerHTML = `<span class="tool-spinner" style="width:16px;height:16px;"></span>`;
-    btnSend.title = "Processing...";
+    btnSend.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
+    btnSend.title = "Cancel (Escape)";
+    btnSend.style.background = "#c0392b";
+    btnSend.onclick = function(e) { e.preventDefault(); cancelStreaming(); };
   } else {
     btnSend.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`;
     btnSend.title = "Send";
+    btnSend.style.background = '';
+    btnSend.onclick = null;
   }
 
   if (state.activeView === "threads" && !state.viewingOldThread) {
