@@ -11,6 +11,9 @@ A native desktop GUI for [pi](https://github.com/mariozechner/pi-coding-agent) �
 - **Full bidirectional chat** — send messages from the window or the terminal, both stay in sync
 - **Real-time streaming** — assistant responses stream token-by-token with thinking indicators
 - **Markdown rendering** with syntax-highlighted code blocks
+- **Mermaid diagrams** — flowcharts, sequence diagrams, state machines, and more rendered as SVG (neutral theme, dark mode adapted via CSS)
+- **LaTeX math** — inline `$...$` and block `$$...$$` formulas rendered via KaTeX
+- **Cancel streaming** — stop button replaces send during streaming, Escape / Ctrl+C keyboard shortcuts
 - **Tool execution display** — see tool calls (bash, read, edit, write) with inline diffs for edits
 - **Sidebar navigation:**
   - **Threads** — browse and switch between session threads
@@ -82,6 +85,10 @@ The extension implements multiple layers of defense:
 
 - [glimpseui](https://github.com/nickarrow/glimpseui) — native webview windows from Node.js
 - [marked](https://github.com/markedjs/marked) — markdown parsing
+- [mermaid](https://github.com/mermaid-js/mermaid) — diagram rendering (loaded via CDN)
+- [KaTeX](https://github.com/KaTeX/KaTeX) — LaTeX math rendering (loaded via CDN)
+- [DOMPurify](https://github.com/cure53/DOMPurify) — HTML sanitization (loaded via CDN)
+- [highlight.js](https://github.com/highlightjs/highlight.js) — syntax highlighting (loaded via CDN)
 - [ws](https://github.com/websockets/ws) — WebSocket support
 
 ## Requirements
