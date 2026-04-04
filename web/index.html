@@ -492,6 +492,13 @@
       </div>
       <div class="mt-2 flex items-center justify-between px-1">
         <div class="flex items-center gap-2 text-[12px] text-pi-text-dim">
+          <button id="btn-plan-mode" class="flex items-center gap-1.5 rounded-lg border border-pi-border px-2.5 py-1 text-[12px] font-medium hover:bg-pi-sidebar-hover transition-all" style="color: var(--text-muted);" title="Plan Mode — read-only, no writes (Ctrl+P)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+            <span>Plan</span>
+          </button>
+          <span>·</span>
           <span>Enter to send</span>
           <span>·</span>
           <span>Shift+Enter for newline</span>
@@ -504,12 +511,6 @@
           <div id="stats-bar" class="flex items-center gap-3 text-[12px] text-pi-text-dim">
             <!-- Filled by JS -->
           </div>
-          <button id="btn-plan-mode" class="flex items-center gap-1.5 rounded-lg border border-pi-border px-2.5 py-2 text-[12px] font-medium hover:bg-pi-sidebar-hover transition-all" style="color: var(--text-muted);" title="Plan Mode — read-only, no writes (Ctrl+P)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-            </svg>
-            <span>Plan</span>
-          </button>
           <button id="btn-attach" class="rounded-lg border border-pi-border p-2 hover:bg-pi-sidebar-hover" title="Attach">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-pi-text-muted">
               <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
