@@ -2018,8 +2018,8 @@ document.addEventListener("keydown", (e) => {
     toggleSidebar();
   }
 
-  // Ctrl+Shift+P: toggle plan mode
-  if (e.ctrlKey && e.shiftKey && e.key === "P") {
+  // Ctrl+P: toggle plan mode
+  if (e.ctrlKey && !e.shiftKey && e.key === "p") {
     e.preventDefault();
     setPlanMode(!state.planMode);
   }
