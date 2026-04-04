@@ -66,6 +66,18 @@ This launches pi and automatically opens the desktop window. You can also create
 
 The window opens alongside your terminal — type in either place. Messages, tool calls, and responses are synced in real-time.
 
+## Security
+
+The extension implements multiple layers of defense:
+
+- **XSS prevention** — all markdown output is sanitized through [DOMPurify](https://github.com/cure53/DOMPurify) with a strict tag/attribute allowlist
+- **Content Security Policy** — restrictive CSP blocks inline scripts from external sources, disables `connect-src`, `object-src`, and `form-action`
+- **Subresource Integrity** — CDN dependencies (marked, highlight.js, DOMPurify) are loaded with `integrity` hashes to prevent tampering
+- **Pinned dependencies** — all CDN scripts are pinned to exact versions
+- **Path traversal protection** — file explorer, thread viewer, and workspace handlers validate that paths stay within allowed directories (cwd and `~/.pi/agent/sessions/`)
+- **Attachment limits** — file uploads are capped at 25 MB with sanitized filenames
+- **Input validation** — message length caps, strict shape validation on persisted config, and traversal rejection on all user-supplied paths
+
 ## Dependencies
 
 - [glimpseui](https://github.com/nickarrow/glimpseui) — native webview windows from Node.js
