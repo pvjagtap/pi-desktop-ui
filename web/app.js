@@ -2,7 +2,66 @@
 // Fully functional chat UI inside a Glimpse native webview.
 // Bidirectional: send messages → pi processes → streams response back.
 
-const data = JSON.parse(document.getElementById("desktop-data").textContent || "{}");
+let data = {};
+try {
+  const raw = document.getElementById("desktop-data").textContent || "{}";
+  data = JSON.parse(raw);
+} catch (e) {
+  console.error("[desktop] Failed to parse desktop-data JSON:", e);
+  // Recovery: escape ALL raw control characters (0x00-0x1F) as \uXXXX inside JSON strings.
+  // The Glimpse webview bridge may corrupt/unescape these during transfer.
+  try {
+    const raw = (document.getElementById("desktop-data").textContent || "{}")
+      .replace(/[\x00-\x1f]/g, function(ch) {
+        return '\\u' + ('0000' + ch.charCodeAt(0).toString(16)).slice(-4);
+      });
+    data = JSON.parse(raw);
+    console.log("[desktop] Recovery parse succeeded after escaping control chars");
+  } catch (e2) { console.error("[desktop] Recovery parse also failed:", e2); }
+}
+
+// ─── Mermaid (beautiful-mermaid) ──────────────────────────────
+
+let _renderMermaidSVG = null;
+let _mermaidLoading = null;
+
+function loadMermaid() {
+  if (_renderMermaidSVG) return Promise.resolve();
+  if (_mermaidLoading) return _mermaidLoading;
+  _mermaidLoading = new Promise(function(resolve) {
+    // Check if already loaded via <script type="module"> in head
+    if (window.__beautifulMermaid && window.__beautifulMermaid.renderMermaidSVG) {
+      _renderMermaidSVG = window.__beautifulMermaid.renderMermaidSVG;
+      resolve();
+      return;
+    }
+    // Wait for the module script to load and set the global
+    window.addEventListener('mermaid-loaded', function() {
+      if (window.__beautifulMermaid && window.__beautifulMermaid.renderMermaidSVG) {
+        _renderMermaidSVG = window.__beautifulMermaid.renderMermaidSVG;
+      }
+      resolve();
+    }, { once: true });
+    // Timeout fallback — don't block forever
+    setTimeout(function() { resolve(); }, 15000);
+  });
+  return _mermaidLoading;
+}
+
+// Start loading immediately (safe — errors are caught)
+try {
+  loadMermaid().then(function() {
+    // Re-render any pending mermaid blocks once loaded
+    if (_renderMermaidSVG) {
+      document.querySelectorAll('.mermaid-pending').forEach(function(el) {
+        var code = el.dataset.mermaidSrc;
+        if (code) {
+          el.outerHTML = renderMermaidBlock(code);
+        }
+      });
+    }
+  });
+} catch(e) { console.warn('Mermaid init error:', e); }
 
 // ─── State ────────────────────────────────────────────────────
 
@@ -95,8 +154,8 @@ function sanitizeHtml(html) {
         'colspan','rowspan','headers','scope',
         'open','width','height','loading',
       ],
-      ALLOW_DATA_ATTR: false,
       ADD_ATTR: ['target'],
+      ALLOW_DATA_ATTR: false,
       FORBID_TAGS: ['style','script','iframe','object','embed','form','input','textarea','button','select'],
       FORBID_ATTR: ['onerror','onload','onclick','onmouseover','onfocus','onblur','style'],
     });
@@ -108,21 +167,119 @@ function renderMarkdown(text) {
   if (!text) return "";
   if (typeof marked !== "undefined") {
     try {
-      let html = marked.parse(text);
-      // Post-process: add syntax highlighting to code blocks
+      // Trusted content that bypasses DOMPurify (mermaid SVG, KaTeX HTML)
+      var trustedBlocks = [];
+
+      // 1. Protect LaTeX formulas from markdown processing
+      var processed = text;
+
+      // Block math: $$...$$ (can span multiple lines)
+      processed = processed.replace(/\$\$([\s\S]+?)\$\$/g, function(_, formula) {
+        var idx = trustedBlocks.length;
+        trustedBlocks.push({ type: 'math', formula: formula.trim(), display: true });
+        return '\n\nTRUSTED_BLOCK_' + idx + '\n\n';
+      });
+
+      // Inline math: $...$ (single line, not empty)
+      processed = processed.replace(/(?:^|[^$])\$([^$\n]+?)\$(?:[^$]|$)/g, function(match, formula) {
+        var idx = trustedBlocks.length;
+        trustedBlocks.push({ type: 'math', formula: formula.trim(), display: false });
+        var leading = match[0] !== '$' ? match[0] : '';
+        var trailing = match[match.length - 1] !== '$' ? match[match.length - 1] : '';
+        return leading + 'TRUSTED_BLOCK_' + idx + trailing;
+      });
+
+      // 2. Parse markdown
+      var html = marked.parse(processed);
+
+      // 3. Extract mermaid blocks and replace with placeholders
+      html = html.replace(/<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g, function(_, code) {
+        var decoded = code.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+        var idx = trustedBlocks.length;
+        trustedBlocks.push({ type: 'mermaid', code: decoded });
+        return 'TRUSTED_BLOCK_' + idx;
+      });
+
+      // 4. Syntax highlighting for code blocks
       if (typeof hljs !== "undefined") {
-        html = html.replace(/<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g, (match, lang, code) => {
+        html = html.replace(/<pre><code class="language-(\w+)">([\s\S]*?)<\/code><\/pre>/g, function(match, lang, code) {
           try {
-            const decoded = code.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
-            const highlighted = hljs.highlight(decoded, { language: lang }).value;
-            return `<pre><code class="language-${lang} hljs">${highlighted}</code></pre>`;
-          } catch { return match; }
+            var decoded = code.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"');
+            var highlighted = hljs.highlight(decoded, { language: lang }).value;
+            return '<pre><code class="language-' + lang + ' hljs">' + highlighted + '</code></pre>';
+          } catch(e) { return match; }
         });
       }
-      return sanitizeHtml(html);
-    } catch {}
+
+      // 5. Sanitize user-generated HTML (safe — trusted blocks are just text placeholders)
+      html = sanitizeHtml(html);
+
+      // 6. Replace placeholders with trusted content AFTER sanitization
+      for (var i = 0; i < trustedBlocks.length; i++) {
+        var block = trustedBlocks[i];
+        var rendered;
+        if (block.type === 'math') {
+          rendered = renderLatex(block.formula, block.display);
+        } else if (block.type === 'mermaid') {
+          rendered = renderMermaidBlock(block.code);
+        }
+        html = html.replace(new RegExp('<p>TRUSTED_BLOCK_' + i + '</p>', 'g'), function() { return rendered; });
+        html = html.replace(new RegExp('TRUSTED_BLOCK_' + i, 'g'), function() { return rendered; });
+      }
+
+      return html;
+    } catch(e) { console.warn('[desktop] renderMarkdown error:', e); }
   }
   return "<p>" + escapeHtml(text).replace(/\n/g, "<br>") + "</p>";
+}
+
+function renderMermaidBlock(code) {
+  if (!_renderMermaidSVG) {
+    // Not loaded yet — return placeholder with raw code
+    return '<div class="mermaid-container mermaid-pending" data-mermaid-src="' + escapeHtml(code) + '">'
+      + '<pre style="text-align:left;"><code class="language-mermaid">' + escapeHtml(code) + '</code></pre>'
+      + '<div style="font-size:12px;color:var(--text-dim);margin-top:8px;">Loading mermaid renderer...</div>'
+      + '</div>';
+  }
+  try {
+    const isDark = state.theme === 'dark';
+    const svg = _renderMermaidSVG(code, {
+      bg: isDark ? '#1a1714' : '#f8f4ef',
+      fg: isDark ? '#e0ddd8' : '#2d2a26',
+      transparent: true,
+    });
+    return '<div class="mermaid-container">' + svg + '</div>';
+  } catch (err) {
+    return '<div class="mermaid-container">'
+      + '<pre style="text-align:left;"><code class="language-mermaid">' + escapeHtml(code) + '</code></pre>'
+      + '<div class="mermaid-error">Diagram error: ' + escapeHtml(err.message || String(err)) + '</div>'
+      + '</div>';
+  }
+}
+
+function renderLatex(formula, displayMode) {
+  if (typeof katex !== 'undefined') {
+    try {
+      const html = katex.renderToString(formula, {
+        displayMode: displayMode,
+        throwOnError: false,
+        output: 'htmlAndMathml',
+        trust: false,
+        strict: false,
+      });
+      return displayMode
+        ? '<div class="math-block">' + html + '</div>'
+        : '<span class="math-inline">' + html + '</span>';
+    } catch (err) {
+      return displayMode
+        ? '<div class="math-block" style="color:#e55;">LaTeX error: ' + escapeHtml(err.message) + '</div>'
+        : '<code style="color:#e55;">' + escapeHtml(formula) + '</code>';
+    }
+  }
+  // Fallback: show raw formula
+  return displayMode
+    ? '<div class="math-block"><code>' + escapeHtml(formula) + '</code></div>'
+    : '<code>' + escapeHtml(formula) + '</code>';
 }
 
 function truncate(str, len) {
@@ -1324,7 +1481,7 @@ function renderMainContent() {
   switch (state.activeView) {
     case "threads": {
       const thread = state.activeThreadIdx >= 0 ? data.threads?.[state.activeThreadIdx] : null;
-      threadLabelEl.textContent = `${data.projectName.toUpperCase()} · ${(data.gitBranch || "LOCAL").toUpperCase()}`;
+      threadLabelEl.textContent = `${(data.projectName || "").toUpperCase()} \u00b7 ${(data.gitBranch || "LOCAL").toUpperCase()}`;
       threadTitleEl.textContent = thread ? truncate(thread.name, 100) : "Current session";
       threadHeaderEl.style.display = "";
       renderMessages();

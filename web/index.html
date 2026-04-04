@@ -3,11 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; img-src data: blob:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; style-src 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; img-src data: blob:; connect-src 'none'; font-src https://cdn.jsdelivr.net; object-src 'none'; base-uri 'none'; form-action 'none';">
 <title>pi Desktop</title>
 <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.3" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.7/marked.min.js" integrity="sha384-H+hy9ULve6xfxRkWIh/YOtvDdpXgV2fmAGQkIDTxIgZwNoaoBal14Di2YTMR6MzR" crossorigin="anonymous"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.2.4/purify.min.js" integrity="sha384-eEu5CTj3qGvu9PdJuS+YlkNi7d2XxQROAFYOr59zgObtlcux1ae1Il3u7jvdCSWu" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js" crossorigin="anonymous"></script>
+<script type="module">
+import { renderMermaidSVG } from "https://cdn.jsdelivr.net/npm/beautiful-mermaid@1.1.3/+esm";
+window.__beautifulMermaid = { renderMermaidSVG };
+window.dispatchEvent(new Event("mermaid-loaded"));
+</script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github.min.css" integrity="sha384-eFTL69TLRZTkNfYZOLM+G04821K1qZao/4QLJbet1pP4tcF+fdXq/9CdqAbWRl/L" crossorigin="anonymous" id="hljs-light">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous" id="hljs-dark" disabled>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js" integrity="sha384-RH2xi4eIQ/gjtbs9fUXM68sLSi99C7ZWBRX1vDrVv6GQXRibxXLbwO2NGZB74MbU" crossorigin="anonymous"></script>
@@ -114,6 +121,33 @@
     font-size: 0.9em;
   }
   .message-content th { font-weight: 600; background: var(--code-bg); }
+
+  /* Mermaid diagrams */
+  .mermaid-container {
+    margin: 0.75em 0;
+    padding: 1em;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    overflow-x: auto;
+    text-align: center;
+  }
+  .mermaid-container svg { max-width: 100%; height: auto; }
+  .mermaid-error {
+    color: #e55;
+    font-size: 0.85em;
+    padding: 0.5em;
+    text-align: left;
+  }
+
+  /* KaTeX math */
+  .math-block {
+    margin: 0.75em 0;
+    overflow-x: auto;
+    text-align: center;
+    padding: 0.5em 0;
+  }
+  .math-inline .katex { font-size: 1em; }
 
   .nav-item { transition: background-color 0.1s; }
   .nav-item:hover { background: var(--sidebar-hover); }

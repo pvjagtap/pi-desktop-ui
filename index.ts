@@ -466,7 +466,9 @@ function escapeNonAscii(str: string): string {
 
 function escapeForInlineScript(value: string): string {
 	return escapeNonAscii(
-		value.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026")
+		value
+			.replace(/[\x00-\x1f]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`)
+			.replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026")
 	);
 }
 
@@ -493,10 +495,36 @@ interface DesktopWindowData {
 function buildDesktopHtml(data: DesktopWindowData): string {
 	const templateHtml = readFileSync(join(webDir, "index.html"), "utf8");
 	const appJs = readFileSync(join(webDir, "app.js"), "utf8");
-	const payload = escapeForInlineScript(JSON.stringify(data));
-	return templateHtml
-		.replace("__INLINE_DATA__", payload)
-		.replace("__INLINE_JS__", appJs);
+
+	// Stringify and aggressively sanitize: escape ALL control characters and non-ASCII
+	const rawJson = JSON.stringify(data);
+	// Replace every character outside printable ASCII with \uXXXX
+	const safeJson = rawJson.replace(/[^\x20-\x7E]/g, (ch) => {
+		const code = ch.charCodeAt(0);
+		return String.fromCharCode(92) + 'u' + code.toString(16).padStart(4, '0');
+	});
+
+	// Debug: write to temp file and verify
+	const debugPath = join(tmpdir(), 'pi-desktop-payload-debug.json');
+	try {
+		writeFileSync(debugPath, safeJson);
+		// Check for any remaining non-printable chars
+		for (let i = 0; i < safeJson.length; i++) {
+			const c = safeJson.charCodeAt(i);
+			if (c < 0x20 || c > 0x7E) {
+				console.error(`[desktop] BAD CHAR at pos ${i}: U+${c.toString(16).padStart(4, '0')} in context: ${JSON.stringify(safeJson.substring(Math.max(0, i - 20), i + 20))}`);
+			}
+		}
+		// Verify it parses
+		JSON.parse(safeJson);
+	} catch (e) {
+		console.error(`[desktop] Payload validation failed:`, e);
+	}
+
+	// Use split+join instead of .replace() to avoid $-pattern interpretation
+	let result = templateHtml.split("__INLINE_DATA__").join(safeJson);
+	result = result.split("__INLINE_JS__").join(appJs);
+	return result;
 }
 
 // ─── Extension Entry Point ───────────────────────────────────
