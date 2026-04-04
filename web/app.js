@@ -88,6 +88,7 @@ const state = {
   showWorkspaceModal: false,
   hiddenWorkspaces: (data.hiddenWorkspaces || {}),  // loaded from disk via backend
   planMode: false,                    // read-only plan mode
+  viewingFile: null,                  // { path, name, content, ext, size } when viewing a file
 };
 
 // ─── DOM References ───────────────────────────────────────────
@@ -735,6 +736,9 @@ function renderBreadcrumb() {
   } else {
     const labels = { workspace: "Workspace", skills: "Skills & Extensions", settings: "Settings", explorer: "Explorer" };
     parts.push(labels[state.activeView] || state.activeView);
+    if (state.activeView === "explorer" && state.viewingFile) {
+      parts.push(`<span class="truncate" style="max-width:400px;">${escapeHtml(state.viewingFile.name)}</span>`);
+    }
   }
   breadcrumbEl.innerHTML = parts.join(`<span class="text-pi-text-dim"> / </span>`);
 }
@@ -1463,6 +1467,11 @@ function closeWorkspaceModal() {
 // ─── Explorer View ────────────────────────────────────────────
 
 function renderExplorerView() {
+  // If viewing a file, show the file viewer instead
+  if (state.viewingFile) {
+    renderFileViewer();
+    return;
+  }
   const files = data.explorerFiles || [];
   let html = `<div class="p-2">`;
   if (files.length === 0) {
@@ -1487,6 +1496,86 @@ function renderExplorerView() {
     btn.addEventListener("click", () => {
       send({ type: "explorer-open", path: btn.dataset.explorerPath });
     });
+  });
+}
+
+// ─── File Viewer ──────────────────────────────────────────────
+
+const EXT_TO_LANG = {
+  js: "javascript", ts: "typescript", jsx: "javascript", tsx: "typescript",
+  py: "python", rb: "ruby", rs: "rust", go: "go", java: "java",
+  c: "c", cpp: "cpp", h: "c", hpp: "cpp", cs: "csharp",
+  html: "xml", htm: "xml", xml: "xml", svg: "xml",
+  css: "css", scss: "scss", less: "less",
+  json: "json", yaml: "yaml", yml: "yaml", toml: "ini",
+  md: "markdown", sh: "bash", bash: "bash", zsh: "bash",
+  sql: "sql", php: "php", swift: "swift", kt: "kotlin",
+  lua: "lua", r: "r", pl: "perl", dockerfile: "dockerfile",
+  makefile: "makefile", cmake: "cmake",
+};
+
+function renderFileViewer() {
+  const f = state.viewingFile;
+  if (!f) return;
+
+  const fileName = f.name || f.path.replace(/\\/g, "/").split("/").pop();
+  const fileSize = f.size ? (f.size < 1024 ? f.size + " B" : (f.size / 1024).toFixed(1) + " KB") : "";
+
+  let html = `<div style="display:flex;flex-direction:column;height:100%;">`;
+
+  // Header bar with back button, file name, size
+  html += `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <button id="file-viewer-back" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer;color:var(--text-muted);font-size:13px;display:flex;align-items:center;gap:4px;" title="Back to file list">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        Back
+      </button>
+      <span style="font-size:14px;font-weight:600;color:var(--text);">📄 ${escapeHtml(fileName)}</span>
+      <span style="font-size:12px;color:var(--text-dim);margin-left:auto;">${escapeHtml(fileSize)}</span>
+      <span style="font-size:11px;color:var(--text-dim);font-family:monospace;">${escapeHtml(f.path || "")}</span>
+    </div>
+  `;
+
+  if (f.error) {
+    html += `<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:14px;">${escapeHtml(f.error)}</div>`;
+  } else if (f.content != null) {
+    // Detect language from extension
+    const lang = EXT_TO_LANG[(f.ext || "").toLowerCase()] || "";
+    let codeHtml = escapeHtml(f.content);
+
+    // Syntax highlight if hljs supports the language
+    if (typeof hljs !== "undefined" && lang && hljs.getLanguage(lang)) {
+      try {
+        codeHtml = hljs.highlight(f.content, { language: lang }).value;
+      } catch (e) { /* fallback to escaped */ }
+    }
+
+    // Line numbers + code
+    const lines = f.content.split("\n");
+    const lineCount = lines.length;
+    const gutterWidth = String(lineCount).length * 9 + 16;
+
+    html += `
+      <div style="flex:1;overflow:auto;" class="scrollbar-thin">
+        <div style="display:flex;font-family:'SF Mono','Cascadia Code','Fira Code','Consolas',monospace;font-size:13px;line-height:1.6;">
+          <div style="flex-shrink:0;width:${gutterWidth}px;text-align:right;padding:12px 8px 12px 12px;color:var(--text-dim);user-select:none;border-right:1px solid var(--border);">
+            ${Array.from({length: lineCount}, (_, i) => `<div>${i + 1}</div>`).join("")}
+          </div>
+          <pre style="flex:1;margin:0;padding:12px 16px;overflow-x:auto;"><code class="${lang ? 'language-' + lang + ' hljs' : ''}" style="white-space:pre;">${codeHtml}</code></pre>
+        </div>
+      </div>
+    `;
+  } else {
+    html += `<div style="padding:32px;text-align:center;color:var(--text-muted);font-size:14px;">Unable to load file content.</div>`;
+  }
+
+  html += `</div>`;
+  messagesEl.innerHTML = html;
+
+  // Back button handler
+  document.getElementById("file-viewer-back")?.addEventListener("click", () => {
+    state.viewingFile = null;
+    renderExplorerView();
   });
 }
 
@@ -2015,6 +2104,16 @@ window.__desktopReceive = function(message) {
 
     case "explorer-data":
       data.explorerFiles = message.files || [];
+      state.viewingFile = null; // back to file list
+      if (state.activeView === "explorer") renderExplorerView();
+      break;
+
+    case "file-content":
+      if (message.error) {
+        state.viewingFile = { path: message.path, name: message.name, ext: message.ext, content: null, error: message.error, size: message.size };
+      } else {
+        state.viewingFile = { path: message.path, name: message.name, ext: message.ext, content: message.content, size: message.size };
+      }
       if (state.activeView === "explorer") renderExplorerView();
       break;
 

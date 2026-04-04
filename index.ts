@@ -747,6 +747,15 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 						if (stat.isDirectory()) {
 							const files = getDirEntries(msg.path);
 							sendToWindow({ type: "explorer-data", files });
+						} else if (stat.isFile()) {
+							// Read file content (limit to 512KB to avoid huge payloads)
+							const MAX_FILE_SIZE = 512 * 1024;
+							if (stat.size > MAX_FILE_SIZE) {
+								sendToWindow({ type: "file-content", path: msg.path, name: basename(msg.path), ext: extname(msg.path).slice(1), content: null, error: `File too large (${(stat.size / 1024).toFixed(0)}KB). Max: 512KB.`, size: stat.size });
+							} else {
+								const content = readFileSync(msg.path, "utf8");
+								sendToWindow({ type: "file-content", path: msg.path, name: basename(msg.path), ext: extname(msg.path).slice(1), content, size: stat.size });
+							}
 						}
 					} catch {}
 				}
