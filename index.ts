@@ -507,6 +507,17 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	let activeWindow: GlimpseWindow | null = null;
 	let lastCtx: ExtensionContext | null = null;
 	let sessionReason: string = "startup";
+	let planMode: boolean = false;
+
+	const PLAN_MODE_PREFIX = `[PLAN MODE ACTIVE — You are in read-only plan mode. STRICT RULES:
+1. Do NOT use edit, write, or any tool that modifies files
+2. Do NOT run bash commands that create, modify, or delete files (no mkdir, rm, mv, cp, touch, tee, sed -i, etc.)
+3. ONLY use: read, grep, find, ls, parallel_search, parallel_research, parallel_extract, todo, subagent (scout only)
+4. Safe bash allowed: git log, git diff, git status, cat, head, tail, wc, echo, pwd, env, which, type
+5. Focus on: reading code, analyzing architecture, creating plans, reviewing scaffolding, identifying patterns
+6. If the user asks you to write or edit, remind them Plan Mode is active and suggest they turn it off first]
+
+`;
 
 	// ─── Window Communication ─────────────────────────────────
 
@@ -597,6 +608,18 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_execution_start", (event, _ctx) => {
+		// Warn in desktop window if a write tool fires during plan mode
+		if (planMode) {
+			const writeTools = new Set(["edit", "write", "claude"]);
+			if (writeTools.has(event.toolName) || (event.toolName === "bash" && event.args?.command)) {
+				sendToWindow({
+					type: "plan-mode-violation",
+					toolName: event.toolName,
+					argsPreview: JSON.stringify(event.args || {}).slice(0, 200),
+				});
+			}
+		}
+
 		// Format args for display
 		let argsDisplay = "";
 		let editDiffs: Array<{ oldText: string; newText: string }> | null = null;
@@ -693,8 +716,9 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			case "send-message": {
 				const text = (msg.text || "").trim();
 				if (!text || text.length > 100_000) break;
-				// Send to pi as a user message
-				pi.sendUserMessage(text);
+				// In plan mode, prepend read-only instruction to every message
+				const finalText = planMode ? PLAN_MODE_PREFIX + text : text;
+				pi.sendUserMessage(finalText);
 				break;
 			}
 
@@ -804,6 +828,19 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 						// No sessions for this path yet
 						sendToWindow({ type: "workspace-opened", dirName: safePath, path: msg.path, sessions: [] });
 					}
+				}
+				break;
+			}
+
+			case "set-plan-mode": {
+				planMode = msg.active === true;
+				if (lastCtx) {
+					lastCtx.ui.notify(
+						planMode
+							? "Plan Mode ON — pi will only read, search, and analyze. No writes."
+							: "Plan Mode OFF — full access restored.",
+						"info"
+					);
 				}
 				break;
 			}

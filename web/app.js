@@ -24,6 +24,7 @@ const state = {
   activeWorkspace: null,         // dirName of workspace being viewed (null = current)
   showWorkspaceModal: false,
   hiddenWorkspaces: (data.hiddenWorkspaces || {}),  // loaded from disk via backend
+  planMode: false,                    // read-only plan mode
 };
 
 // ─── DOM References ───────────────────────────────────────────
@@ -150,6 +151,26 @@ function setTheme(theme) {
 
 btnTheme.addEventListener("click", () => {
   setTheme(state.theme === "light" ? "dark" : "light");
+});
+
+// ─── Plan Mode ────────────────────────────────────────────────
+
+const btnPlanMode = document.getElementById("btn-plan-mode");
+const planModeBanner = document.getElementById("plan-mode-banner");
+
+function setPlanMode(active) {
+  state.planMode = active;
+  btnPlanMode.classList.toggle("plan-active", active);
+  planModeBanner.style.display = active ? "flex" : "none";
+  inputTextEl.placeholder = active
+    ? "Plan mode — ask pi to read, analyze, or plan (no writes)..."
+    : "Ask pi to inspect the repo, run a fix, or continue the current thread...";
+  // Notify backend
+  send({ type: "set-plan-mode", active });
+}
+
+btnPlanMode.addEventListener("click", () => {
+  setPlanMode(!state.planMode);
 });
 
 // ─── Sidebar Toggle ───────────────────────────────────────────
@@ -1862,8 +1883,56 @@ window.__desktopReceive = function(message) {
       inputTextEl.focus();
       break;
     }
+
+    case "plan-mode-violation": {
+      showPlanModeWarning(message.toolName, message.argsPreview);
+      break;
+    }
   }
 };
+
+// ─── Plan Mode Warning Toast ────────────────────────────────────
+
+function showPlanModeWarning(toolName, argsPreview) {
+  // Remove existing warning if any
+  const existing = document.getElementById("plan-mode-warning");
+  if (existing) existing.remove();
+
+  const toast = document.createElement("div");
+  toast.id = "plan-mode-warning";
+  toast.style.cssText = `
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 200;
+    background: color-mix(in srgb, #e55 12%, var(--bg));
+    border: 1px solid color-mix(in srgb, #e55 40%, var(--border));
+    border-radius: 10px;
+    padding: 12px 16px;
+    max-width: 400px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    animation: fadeIn 0.2s ease-out;
+  `;
+  toast.innerHTML = `
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+      <span style="font-size:16px;">\u26a0\ufe0f</span>
+      <span style="font-weight:600;font-size:13px;color:#e55;">Plan Mode Violation</span>
+      <button onclick="this.closest('#plan-mode-warning').remove()" style="margin-left:auto;color:var(--text-dim);border:none;background:none;cursor:pointer;font-size:16px;line-height:1;">&times;</button>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);">
+      <strong>${escapeHtml(toolName)}</strong> attempted while Plan Mode is active.
+      <div style="margin-top:4px;font-family:monospace;font-size:11px;color:var(--text-dim);max-height:60px;overflow:hidden;">${escapeHtml(argsPreview || "")}</div>
+    </div>
+  `;
+  document.body.appendChild(toast);
+
+  // Auto-dismiss after 6 seconds
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transition = "opacity 0.3s";
+    setTimeout(() => toast.remove(), 300);
+  }, 6000);
+}
 
 // ─── Streaming UI Updates ─────────────────────────────────────
 
@@ -1947,6 +2016,12 @@ document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key === "b") {
     e.preventDefault();
     toggleSidebar();
+  }
+
+  // Ctrl+Shift+P: toggle plan mode
+  if (e.ctrlKey && e.shiftKey && e.key === "P") {
+    e.preventDefault();
+    setPlanMode(!state.planMode);
   }
 
   if (e.key === "Escape") {
