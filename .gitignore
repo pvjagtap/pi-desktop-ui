@@ -1,5 +1,6 @@
 node_modules/
 .rag-index/
 .history/
+.agents/
 test-dummy.txt
 *.log
