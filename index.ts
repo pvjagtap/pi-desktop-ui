@@ -11,7 +11,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, basename, dirname, extname } from "node:path";
+import { join, basename, dirname, extname, resolve, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -22,6 +22,43 @@ import { open, type GlimpseWindow } from "glimpseui";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const webDir = join(__dirname, "web");
+
+// ─── Security Helpers ────────────────────────────────────────
+
+const MAX_ATTACH_SIZE = 25 * 1024 * 1024; // 25 MB max attachment
+
+/** Validate that a path is within allowed directories (sessions, cwd, or home). */
+function isPathAllowed(filePath: string, ctx: { cwd: string } | null): boolean {
+	const home = process.env.HOME || process.env.USERPROFILE || "";
+	const resolved = resolve(normalize(filePath));
+	const sessionsDir = resolve(join(home, ".pi", "agent", "sessions"));
+
+	// Allow paths under the sessions directory
+	if (resolved.startsWith(sessionsDir + "/") || resolved.startsWith(sessionsDir + "\\")) return true;
+
+	// Allow paths under the current working directory
+	if (ctx) {
+		const cwdResolved = resolve(ctx.cwd);
+		if (resolved.startsWith(cwdResolved + "/") || resolved.startsWith(cwdResolved + "\\") || resolved === cwdResolved) return true;
+	}
+
+	return false;
+}
+
+/** Validate that a session file path is a .jsonl file inside the sessions directory. */
+function isValidSessionFile(filePath: string): boolean {
+	const home = process.env.HOME || process.env.USERPROFILE || "";
+	const resolved = resolve(normalize(filePath));
+	const sessionsDir = resolve(join(home, ".pi", "agent", "sessions"));
+
+	if (!resolved.endsWith(".jsonl")) return false;
+	if (!resolved.startsWith(sessionsDir + "/") && !resolved.startsWith(sessionsDir + "\\")) return false;
+
+	// Reject path traversal attempts
+	if (filePath.includes("..")) return false;
+
+	return true;
+}
 
 // ─── Hidden Workspaces Persistence ───────────────────────────
 
@@ -288,6 +325,8 @@ function getWorkspaces() {
 }
 
 function getWorkspaceSessions(dirName: string) {
+	// Reject traversal attempts
+	if (dirName.includes("..") || dirName.includes("/") || dirName.includes("\\")) return [];
 	const home = process.env.HOME || process.env.USERPROFILE || "";
 	const dirPath = join(home, ".pi", "agent", "sessions", dirName);
 	return getSessionThreads(dirPath);
@@ -653,14 +692,14 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		switch (msg.type) {
 			case "send-message": {
 				const text = (msg.text || "").trim();
-				if (!text) break;
+				if (!text || text.length > 100_000) break;
 				// Send to pi as a user message
 				pi.sendUserMessage(text);
 				break;
 			}
 
 			case "open-thread": {
-				if (msg.file) {
+				if (msg.file && isValidSessionFile(msg.file)) {
 					const threadMsgs = extractThreadMessages(msg.file);
 					sendToWindow({ type: "thread-messages", messages: threadMsgs, threadIdx: msg.index ?? 0 });
 				}
@@ -676,7 +715,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			}
 
 			case "explorer-open": {
-				if (msg.path) {
+				if (msg.path && isPathAllowed(msg.path, lastCtx)) {
 					try {
 						const stat = statSync(msg.path);
 						if (stat.isDirectory()) {
@@ -739,13 +778,21 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			}
 
 			case "open-folder-path": {
-				if (msg.path) {
+				if (msg.path && typeof msg.path === "string" && msg.path.length < 1000) {
+					// Reject path traversal attempts
+					if (msg.path.includes("..")) break;
+
 					const folderPath = msg.path.replace(/\\/g, "/").replace(/\/$/, "");
 					// Encode path to session dir name format
 					const safePath = `--${folderPath.replace(/^\//, "").replace(/[\/\\:]/g, "-")}--`;
 					const home = process.env.HOME || process.env.USERPROFILE || "";
 					const sessionsRoot = join(home, ".pi", "agent", "sessions");
 					const sessionDir = join(sessionsRoot, safePath);
+
+					// Verify the session dir is actually under sessions root (prevent traversal via crafted safePath)
+					const resolvedSessionDir = resolve(normalize(sessionDir));
+					const resolvedSessionsRoot = resolve(sessionsRoot);
+					if (!resolvedSessionDir.startsWith(resolvedSessionsRoot + "/") && !resolvedSessionDir.startsWith(resolvedSessionsRoot + "\\")) break;
 
 					if (existsSync(sessionDir)) {
 						// Workspace exists - expand it in sidebar
@@ -772,9 +819,17 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 				const base64 = msg.base64;
 				if (!base64) break;
 
+				// Reject oversized attachments (base64 is ~4/3 of original)
+				if (base64.length > MAX_ATTACH_SIZE * 1.37) {
+					sendToWindow({ type: "file-attached-ack", path: "", name, error: "File too large (max 25MB)" });
+					break;
+				}
+
 				try {
 					const ext = extname(name) || (mimeType.startsWith("image/") ? "." + (mimeType.split("/")[1] || "png") : ".bin");
-					const fileName = `pi-attach-${randomUUID()}${ext}`;
+					// Sanitize filename: strip path separators, restrict to safe characters
+					const safeExt = ext.replace(/[^a-zA-Z0-9.]/g, "").slice(0, 10);
+					const fileName = `pi-attach-${randomUUID()}${safeExt}`;
 					const filePath = join(tmpdir(), fileName);
 					writeFileSync(filePath, Buffer.from(base64, "base64"));
 					sendToWindow({ type: "file-attached-ack", path: filePath, name });
@@ -786,7 +841,14 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 
 			case "set-hidden-workspaces": {
 				if (msg.hiddenWorkspaces && typeof msg.hiddenWorkspaces === "object") {
-					saveHiddenWorkspaces(msg.hiddenWorkspaces);
+					// Validate shape: must be Record<string, boolean> — reject anything else
+					const sanitized: Record<string, boolean> = {};
+					for (const [key, val] of Object.entries(msg.hiddenWorkspaces)) {
+						if (typeof key === "string" && typeof val === "boolean" && key.length < 500) {
+							sanitized[key] = val;
+						}
+					}
+					saveHiddenWorkspaces(sanitized);
 				}
 				break;
 			}

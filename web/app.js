@@ -76,6 +76,33 @@ function timeAgo(dateStr) {
   return Math.floor(s / 86400) + "d";
 }
 
+function sanitizeHtml(html) {
+  if (typeof DOMPurify !== "undefined") {
+    return DOMPurify.sanitize(html, {
+      ALLOWED_TAGS: [
+        'h1','h2','h3','h4','h5','h6','p','br','hr','blockquote',
+        'ul','ol','li','dl','dt','dd',
+        'strong','em','b','i','u','s','del','ins','mark','sub','sup','small',
+        'a','code','pre','kbd','samp','var',
+        'table','thead','tbody','tfoot','tr','th','td','caption',
+        'img','figure','figcaption',
+        'details','summary',
+        'div','span',
+      ],
+      ALLOWED_ATTR: [
+        'href','title','alt','src','class','id','lang',
+        'colspan','rowspan','headers','scope',
+        'open','width','height','loading',
+      ],
+      ALLOW_DATA_ATTR: false,
+      ADD_ATTR: ['target'],
+      FORBID_TAGS: ['style','script','iframe','object','embed','form','input','textarea','button','select'],
+      FORBID_ATTR: ['onerror','onload','onclick','onmouseover','onfocus','onblur','style'],
+    });
+  }
+  return html;
+}
+
 function renderMarkdown(text) {
   if (!text) return "";
   if (typeof marked !== "undefined") {
@@ -91,7 +118,7 @@ function renderMarkdown(text) {
           } catch { return match; }
         });
       }
-      return html;
+      return sanitizeHtml(html);
     } catch {}
   }
   return "<p>" + escapeHtml(text).replace(/\n/g, "<br>") + "</p>";
