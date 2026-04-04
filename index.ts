@@ -68,10 +68,16 @@ const BUILTIN_COMMANDS = [
 ];
 
 function getAllCommands(pi: ExtensionAPI) {
-	const extCommands = pi.getCommands().map(c => ({ name: c.name, description: c.description || "" }));
+	const extCommands = pi.getCommands().map(c => ({
+		name: c.name,
+		description: c.description || "",
+		source: (c as any).sourceInfo?.source || "extension",
+		scope: (c as any).sourceInfo?.scope || "",
+		path: (c as any).sourceInfo?.path || "",
+	}));
 	const extNames = new Set(extCommands.map(c => c.name));
 	return [
-		...BUILTIN_COMMANDS.filter(c => !extNames.has(c.name)),
+		...BUILTIN_COMMANDS.filter(c => !extNames.has(c.name)).map(c => ({ ...c, source: "built-in", scope: "app", path: "" })),
 		...extCommands,
 	].sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -441,7 +447,7 @@ interface DesktopWindowData {
 	workspaces: Array<{ name: string; path: string; dirName: string; sessionCount: number; lastActive: string }>;
 	messages: Array<{ role: string; content: string; toolName?: string }>;
 	explorerFiles: Array<{ name: string; isDir: boolean; size: string; path: string }>;
-	commands: Array<{ name: string; description: string }>;
+	commands: Array<{ name: string; description: string; source: string; scope: string; path: string }>;
 	hiddenWorkspaces: Record<string, boolean>;
 }
 
@@ -461,6 +467,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	let gitBranch: string | null = null;
 	let activeWindow: GlimpseWindow | null = null;
 	let lastCtx: ExtensionContext | null = null;
+	let sessionReason: string = "startup";
 
 	// ─── Window Communication ─────────────────────────────────
 
@@ -482,6 +489,8 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		const w = activeWindow;
 		activeWindow = null;
 		try { w.close(); } catch {}
+		// Clear custom thinking label when desktop window closes
+		try { lastCtx?.ui?.setHiddenThinkingLabel?.(undefined as any); } catch {}
 	}
 
 	// ─── Streaming Event Handlers (global) ────────────────────
@@ -591,6 +600,15 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			editPath,
 		});
 	});
+
+	pi.on("before_provider_request", ((event: any, _ctx: ExtensionContext) => {
+		// Forward provider request metadata to desktop window for real-time model/provider display
+		sendToWindow({
+			type: "provider-request",
+			model: event.model ?? "",
+			provider: event.provider ?? "",
+		});
+	}) as any);
 
 	pi.on("tool_execution_end", (event, _ctx) => {
 		// Extract result text
@@ -819,6 +837,9 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		});
 		activeWindow = win;
 
+		// Customize thinking block label while desktop window is open (v0.64.0)
+		try { ctx.ui.setHiddenThinkingLabel?.("thinking (visible in Desktop ◈)"); } catch {}
+
 		win.on("message", handleWindowMessage);
 		win.on("closed", () => {
 			if (activeWindow === win) activeWindow = null;
@@ -900,29 +921,44 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 
 	// ─── Session Lifecycle ────────────────────────────────────
 
-	pi.on("session_start", async (_event, ctx) => {
+	// Unified session lifecycle — v0.65.0 removed session_switch and session_fork.
+	// Use session_start with event.reason ("startup" | "reload" | "new" | "resume" | "fork").
+	pi.on("session_start", async (event, ctx) => {
 		if (!ctx.hasUI) return;
+
+		const reason = (event as any).reason || "startup";
+		const previousSessionFile = (event as any).previousSessionFile || null;
+		sessionReason = reason;
+
 		projectName = getProjectName(ctx.cwd);
 		lastCtx = ctx;
 		enableFooter(ctx);
 		enableWidget(ctx);
 		ctx.ui.setStatus("desktop", ctx.ui.theme.fg("dim", "◈ Desktop"));
 
-		// Auto-open desktop window if --desktop flag or PI_DESKTOP env is set
-		const desktopFlag = pi.getFlag("desktop");
-		const desktopEnv = process.env.PI_DESKTOP === "1";
-		ctx.ui.notify(`desktop flag: ${JSON.stringify(desktopFlag)}, env: ${desktopEnv}`, "info");
-		if (desktopFlag || desktopEnv) {
-			setTimeout(() => openDesktopWindow(ctx), 500);
+		// Notify desktop window of session change with reason context
+		if (reason !== "startup") {
+			const messages = extractSessionMessages(ctx);
+			const stats = getTokenStats(ctx);
+			sendToWindow({
+				type: "session-changed",
+				reason,
+				previousSessionFile,
+				projectName,
+				model: ctx.model?.id || "no-model",
+				messages,
+				stats,
+			});
 		}
-	});
 
-	pi.on("session_switch", async (_event, ctx) => {
-		if (!ctx.hasUI) return;
-		projectName = getProjectName(ctx.cwd);
-		lastCtx = ctx;
-		enableFooter(ctx);
-		enableWidget(ctx);
+		// Auto-open desktop window if --desktop flag or PI_DESKTOP env is set
+		if (reason === "startup") {
+			const desktopFlag = pi.getFlag("desktop");
+			const desktopEnv = process.env.PI_DESKTOP === "1";
+			if (desktopFlag || desktopEnv) {
+				setTimeout(() => openDesktopWindow(ctx), 500);
+			}
+		}
 	});
 
 	pi.on("session_shutdown", async () => {
