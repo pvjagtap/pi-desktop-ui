@@ -89,11 +89,16 @@ const state = {
   hiddenWorkspaces: (data.hiddenWorkspaces || {}),  // loaded from disk via backend
   planMode: false,                    // read-only plan mode
   viewingFile: null,                  // { path, name, content, ext, size } when viewing a file
+  // Explorer tree state (sidebar)
+  explorerTreeExpanded: {},           // { dirPath: true } - which dirs are expanded
+  explorerTreeChildren: {},           // { dirPath: [...entries] } - cached children per dir
+  explorerTreeRoot: null,             // root path for tree
 };
 
 // ─── DOM References ───────────────────────────────────────────
 
 const projectTreeEl = document.getElementById("project-tree");
+const explorerTreeEl = document.getElementById("explorer-tree");
 const breadcrumbEl = document.getElementById("breadcrumb");
 const threadHeaderEl = document.getElementById("thread-header");
 const threadLabelEl = document.getElementById("thread-label");
@@ -374,6 +379,11 @@ navItems.forEach(item => {
       showWorkspaceModal();
       return;
     }
+    // Toggle explorer: if already active, collapse back to threads
+    if (item.dataset.nav === "explorer" && state.activeView === "explorer") {
+      setActiveNav("threads");
+      return;
+    }
     setActiveNav(item.dataset.nav);
     send({ type: "nav", action: item.dataset.nav });
   });
@@ -507,6 +517,10 @@ function renderProjectTree() {
 
       if (ws === "__current__") {
         state.activeWorkspace = null;
+        // Reset explorer tree to current workspace
+        state.explorerTreeExpanded = {};
+        state.explorerTreeChildren = {};
+        state.explorerTreeRoot = null;
         if (idx === -1) {
           state.viewingOldThread = false;
           send({ type: "get-stats" });
@@ -518,10 +532,14 @@ function renderProjectTree() {
       } else {
         // Viewing a session from another workspace
         state.activeWorkspace = ws;
+        // Reset explorer tree for other workspace
+        state.explorerTreeExpanded = {};
+        state.explorerTreeChildren = {};
+        state.explorerTreeRoot = null;
         state.viewingOldThread = true;
         const file = btn.dataset.wsFile;
         if (file) {
-          send({ type: "open-thread", file, index: idx });
+          send({ type: "open-thread", file, index: idx, workspace: ws });
         }
       }
     });
@@ -722,7 +740,13 @@ function renderHiddenWorkspacesBar(hiddenWs) {
 // ─── Breadcrumb ───────────────────────────────────────────────
 
 function renderBreadcrumb() {
-  const parts = [escapeHtml(data.projectName)];
+  // Show active workspace name if viewing another workspace's thread
+  let projectLabel = data.projectName;
+  if (state.activeWorkspace && state.activeWorkspace !== "__current__") {
+    const ws = (data.workspaces || []).find(w => w.dirName === state.activeWorkspace);
+    if (ws) projectLabel = ws.name;
+  }
+  const parts = [escapeHtml(projectLabel)];
   if (state.activeView === "threads") {
     if (data.gitBranch) {
       parts.push(`<span class="rounded px-2 py-0.5 text-[12px] font-medium" style="background:var(--breadcrumb-badge);">${escapeHtml(data.gitBranch)}</span>`);
@@ -1464,6 +1488,99 @@ function closeWorkspaceModal() {
   if (modal) modal.remove();
 }
 
+// ─── Explorer Sidebar Tree ───────────────────────────────────
+
+function renderExplorerTree() {
+  if (!explorerTreeEl) return;
+  const rootPath = state.explorerTreeRoot;
+  // Back button to return to threads
+  let html = `<div class="flex items-center gap-1.5 px-2 py-1.5 mb-1 cursor-pointer hover:bg-pi-sidebar-hover rounded text-[12px]" id="explorer-tree-back" style="color:var(--text-muted);">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+    <span>Threads</span>
+  </div>`;
+  if (!rootPath) {
+    html += `<div class="py-4 text-center text-[12px]" style="color:var(--text-dim);">Loading…</div>`;
+    explorerTreeEl.innerHTML = html;
+    attachExplorerTreeBack();
+    return;
+  }
+  const rootChildren = state.explorerTreeChildren[rootPath] || [];
+  if (rootChildren.length === 0) {
+    html += `<div class="py-4 text-center text-[12px]" style="color:var(--text-dim);">No files found.</div>`;
+    explorerTreeEl.innerHTML = html;
+    attachExplorerTreeBack();
+    return;
+  }
+  html += renderTreeNodes(rootChildren, 0);
+  explorerTreeEl.innerHTML = html;
+  attachExplorerTreeBack();
+  attachTreeListeners(explorerTreeEl);
+}
+
+function attachExplorerTreeBack() {
+  document.getElementById("explorer-tree-back")?.addEventListener("click", () => {
+    setActiveNav("threads");
+  });
+}
+
+function renderTreeNodes(entries, depth) {
+  let html = "";
+  for (const f of entries) {
+    const indent = depth * 16;
+    const isExpanded = !!state.explorerTreeExpanded[f.path];
+    if (f.isDir) {
+      const chevron = isExpanded
+        ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;"><path d="M7 10l5 5 5-5z"/></svg>`
+        : `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;"><path d="M10 7l5 5-5 5z"/></svg>`;
+      html += `<div class="flex items-center gap-1 cursor-pointer hover:bg-pi-sidebar-hover rounded px-1 py-[2px] text-[12px]"
+        style="padding-left:${indent + 4}px;" data-tree-dir="${escapeHtml(f.path)}">
+        ${chevron}
+        <span style="color:var(--accent);flex-shrink:0;">📁</span>
+        <span class="truncate" style="color:var(--text);">${escapeHtml(f.name)}</span>
+      </div>`;
+      if (isExpanded) {
+        const children = state.explorerTreeChildren[f.path] || [];
+        if (children.length > 0) {
+          html += renderTreeNodes(children, depth + 1);
+        } else {
+          html += `<div class="text-[11px]" style="padding-left:${indent + 24}px;color:var(--text-dim);">Loading…</div>`;
+        }
+      }
+    } else {
+      html += `<div class="flex items-center gap-1 cursor-pointer hover:bg-pi-sidebar-hover rounded px-1 py-[2px] text-[12px]"
+        style="padding-left:${indent + 4}px;" data-tree-file="${escapeHtml(f.path)}">
+        <span style="flex-shrink:0;width:10px;"></span>
+        <span style="flex-shrink:0;">📄</span>
+        <span class="truncate" style="color:var(--text-muted);">${escapeHtml(f.name)}</span>
+      </div>`;
+    }
+  }
+  return html;
+}
+
+function attachTreeListeners(container) {
+  container.querySelectorAll("[data-tree-dir]").forEach(el => {
+    el.addEventListener("click", () => {
+      const dirPath = el.dataset.treeDir;
+      if (state.explorerTreeExpanded[dirPath]) {
+        delete state.explorerTreeExpanded[dirPath];
+        renderExplorerTree();
+      } else {
+        state.explorerTreeExpanded[dirPath] = true;
+        if (!state.explorerTreeChildren[dirPath]) {
+          send({ type: "explorer-tree-expand", path: dirPath });
+        }
+        renderExplorerTree();
+      }
+    });
+  });
+  container.querySelectorAll("[data-tree-file]").forEach(el => {
+    el.addEventListener("click", () => {
+      send({ type: "explorer-open", path: el.dataset.treeFile });
+    });
+  });
+}
+
 // ─── Explorer View ────────────────────────────────────────────
 
 function renderExplorerView() {
@@ -1584,6 +1701,14 @@ function renderFileViewer() {
 function renderMainContent() {
   renderBreadcrumb();
   renderProjectTree();
+
+  // Toggle explorer tree visibility in sidebar (inline after Explorer button)
+  if (state.activeView === "explorer") {
+    explorerTreeEl.style.display = "";
+    renderExplorerTree();
+  } else {
+    explorerTreeEl.style.display = "none";
+  }
 
   switch (state.activeView) {
     case "threads": {
@@ -2108,6 +2233,14 @@ window.__desktopReceive = function(message) {
       if (state.activeView === "explorer") renderExplorerView();
       break;
 
+    case "explorer-tree-children":
+      if (message.parentPath) {
+        state.explorerTreeChildren[message.parentPath] = message.children || [];
+        if (!state.explorerTreeRoot) state.explorerTreeRoot = message.parentPath;
+        if (state.activeView === "explorer") renderExplorerTree();
+      }
+      break;
+
     case "file-content":
       if (message.error) {
         state.viewingFile = { path: message.path, name: message.name, ext: message.ext, content: null, error: message.error, size: message.size };
@@ -2148,6 +2281,16 @@ window.__desktopReceive = function(message) {
 
     case "workspace-opened":
       if (message.dirName) {
+        // Reset explorer tree for new workspace
+        state.explorerTreeExpanded = {};
+        state.explorerTreeChildren = {};
+        state.explorerTreeRoot = null;
+        state.viewingFile = null;
+        data.explorerFiles = [];
+        // Re-request explorer data if explorer is active
+        if (state.activeView === "explorer") {
+          send({ type: "nav", action: "explorer" });
+        }
         // Add to workspaces list if not already there
         const wsPath = message.path || "";
         const wsName = wsPath.split(/[\\/]/).pop() || wsPath;

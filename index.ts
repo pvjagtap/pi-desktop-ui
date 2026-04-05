@@ -15,6 +15,7 @@ import { join, basename, dirname, extname, resolve, normalize } from "node:path"
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
+import { exec } from "node:child_process";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
@@ -508,6 +509,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	let gitBranch: string | null = null;
 	let activeWindow: GlimpseWindow | null = null;
 	let lastCtx: ExtensionContext | null = null;
+	let activeExplorerCwd: string | null = null; // override CWD when viewing another workspace
 	let sessionReason: string = "startup";
 	let planMode: boolean = false;
 
@@ -728,33 +730,75 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 				if (msg.file && isValidSessionFile(msg.file)) {
 					const threadMsgs = extractThreadMessages(msg.file);
 					sendToWindow({ type: "thread-messages", messages: threadMsgs, threadIdx: msg.index ?? 0 });
+					// Switch explorer CWD when viewing another workspace's thread
+					if (msg.workspace && typeof msg.workspace === "string" && msg.workspace !== "__current__") {
+						const decodedPath = decodeSessionDirName(msg.workspace);
+						if (existsSync(decodedPath)) {
+							activeExplorerCwd = decodedPath;
+						}
+					} else {
+						activeExplorerCwd = null; // back to current workspace
+					}
 				}
 				break;
 			}
 
 			case "nav": {
-				if (msg.action === "explorer" && lastCtx) {
-					const files = getDirEntries(lastCtx.cwd);
-					sendToWindow({ type: "explorer-data", files });
+				if (msg.action === "explorer") {
+					const cwd = activeExplorerCwd || lastCtx?.cwd;
+					if (cwd) {
+						const files = getDirEntries(cwd);
+						sendToWindow({ type: "explorer-data", files });
+						sendToWindow({ type: "explorer-tree-children", parentPath: cwd, children: files });
+					}
+				}
+				break;
+			}
+
+			case "explorer-tree-expand": {
+				// Expand a directory in the sidebar tree
+				const explorerCtx = activeExplorerCwd ? { cwd: activeExplorerCwd } : lastCtx;
+				if (msg.path && isPathAllowed(msg.path, explorerCtx)) {
+					try {
+						const stat = statSync(msg.path);
+						if (stat.isDirectory()) {
+							const children = getDirEntries(msg.path);
+							sendToWindow({ type: "explorer-tree-children", parentPath: msg.path, children });
+						}
+					} catch {}
 				}
 				break;
 			}
 
 			case "explorer-open": {
-				if (msg.path && isPathAllowed(msg.path, lastCtx)) {
+				const openCtx = activeExplorerCwd ? { cwd: activeExplorerCwd } : lastCtx;
+				if (msg.path && isPathAllowed(msg.path, openCtx)) {
 					try {
 						const stat = statSync(msg.path);
 						if (stat.isDirectory()) {
 							const files = getDirEntries(msg.path);
 							sendToWindow({ type: "explorer-data", files });
 						} else if (stat.isFile()) {
-							// Read file content (limit to 512KB to avoid huge payloads)
-							const MAX_FILE_SIZE = 512 * 1024;
-							if (stat.size > MAX_FILE_SIZE) {
-								sendToWindow({ type: "file-content", path: msg.path, name: basename(msg.path), ext: extname(msg.path).slice(1), content: null, error: `File too large (${(stat.size / 1024).toFixed(0)}KB). Max: 512KB.`, size: stat.size });
+							// Images and binaries → open with system default app
+							const imageExts = new Set(["png","jpg","jpeg","gif","bmp","svg","webp","ico","tiff","tif"]);
+							const binaryExts = new Set(["pdf","doc","docx","xls","xlsx","ppt","pptx","zip","tar","gz","exe","dll","so","dylib","mp3","mp4","mov","avi","wav"]);
+							const ext = extname(msg.path).slice(1).toLowerCase();
+							if (imageExts.has(ext) || binaryExts.has(ext)) {
+								// Open with system default app
+								const escapedPath = msg.path.replace(/"/g, '\\"');
+								const cmd = process.platform === "win32" ? `start "" "${escapedPath}"`
+									: process.platform === "darwin" ? `open "${escapedPath}"`
+									: `xdg-open "${escapedPath}"`;
+								exec(cmd);
 							} else {
-								const content = readFileSync(msg.path, "utf8");
-								sendToWindow({ type: "file-content", path: msg.path, name: basename(msg.path), ext: extname(msg.path).slice(1), content, size: stat.size });
+								// Text file → read and send content
+								const MAX_FILE_SIZE = 512 * 1024;
+								if (stat.size > MAX_FILE_SIZE) {
+									sendToWindow({ type: "file-content", path: msg.path, name: basename(msg.path), ext, content: null, error: `File too large (${(stat.size / 1024).toFixed(0)}KB). Max: 512KB.`, size: stat.size });
+								} else {
+									const content = readFileSync(msg.path, "utf8");
+									sendToWindow({ type: "file-content", path: msg.path, name: basename(msg.path), ext, content, size: stat.size });
+								}
 							}
 						}
 					} catch {}

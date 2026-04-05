@@ -469,6 +469,10 @@
       <button class="nav-item flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px]" data-nav="explorer">
         <span class="text-base">&#x1F4C1;</span><span class="sidebar-expanded-only">Explorer</span>
       </button>
+      <!-- Explorer Tree (inline, right after Explorer button) -->
+      <div id="explorer-tree" class="sidebar-expanded-only scrollbar-thin overflow-y-auto px-1 pb-1" style="display:none;max-height:50vh;">
+        <!-- Filled by JS -->
+      </div>
     </nav>
 
     <!-- New Thread -->
@@ -481,7 +485,7 @@
     <!-- Separator -->
     <div class="my-2 border-t border-pi-border"></div>
 
-    <!-- Project Tree -->
+    <!-- Project Tree (threads/workspaces) -->
     <div id="project-tree" class="sidebar-expanded-only scrollbar-thin flex-1 overflow-y-auto px-2 pb-3">
       <!-- Filled by JS -->
     </div>
