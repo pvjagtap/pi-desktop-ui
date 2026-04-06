@@ -485,6 +485,19 @@
     <!-- Separator -->
     <div class="my-2 border-t border-pi-border"></div>
 
+    <!-- Thread Search -->
+    <div class="sidebar-expanded-only px-2 pb-2">
+      <div class="relative">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-pi-text-dim absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+        <input id="thread-search" type="text" placeholder="Search threads..." class="w-full rounded-md border border-pi-border bg-pi-input pl-8 pr-8 py-1.5 text-[13px] text-pi-text placeholder:text-pi-text-dim focus:outline-none focus:border-pi-accent" autocomplete="off" spellcheck="false">
+        <button id="thread-search-clear" class="absolute right-2 top-1/2 -translate-y-1/2 text-pi-text-dim hover:text-pi-text hidden" title="Clear search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+    </div>
+
     <!-- Project Tree (threads/workspaces) -->
     <div id="project-tree" class="sidebar-expanded-only scrollbar-thin flex-1 overflow-y-auto px-2 pb-3">
       <!-- Filled by JS -->

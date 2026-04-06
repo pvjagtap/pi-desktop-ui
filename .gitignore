@@ -4,3 +4,4 @@ node_modules/
 .agents/
 test-dummy.txt
 *.log
+copilot_all_tools.jsonl
