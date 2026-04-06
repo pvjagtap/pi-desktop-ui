@@ -93,6 +93,7 @@ const state = {
   explorerTreeExpanded: {},           // { dirPath: true } - which dirs are expanded
   explorerTreeChildren: {},           // { dirPath: [...entries] } - cached children per dir
   explorerTreeRoot: null,             // root path for tree
+  searchResults: null,                // null = no search, [] = search with results
 };
 
 // ─── DOM References ───────────────────────────────────────────
@@ -389,18 +390,146 @@ navItems.forEach(item => {
   });
 });
 
+// ─── Thread Search ──────────────────────────────────────────
+
+let threadSearchQuery = "";
+let _searchDebounceTimer = null;
+
+const threadSearchInput = document.getElementById("thread-search");
+const threadSearchClear = document.getElementById("thread-search-clear");
+
+function clearThreadSearch() {
+  threadSearchQuery = "";
+  state.searchResults = null;
+  if (threadSearchInput) threadSearchInput.value = "";
+  if (threadSearchClear) threadSearchClear.classList.add("hidden");
+  if (_searchDebounceTimer) clearTimeout(_searchDebounceTimer);
+  renderProjectTree();
+}
+
+if (threadSearchClear) {
+  threadSearchClear.addEventListener("click", clearThreadSearch);
+}
+
+if (threadSearchInput) {
+  threadSearchInput.addEventListener("input", () => {
+    const raw = threadSearchInput.value.trim();
+    threadSearchQuery = raw.toLowerCase();
+
+    if (_searchDebounceTimer) clearTimeout(_searchDebounceTimer);
+
+    // Show/hide clear button
+    if (threadSearchClear) threadSearchClear.classList.toggle("hidden", !raw);
+
+    if (!raw) {
+      // Cleared search — restore normal tree
+      state.searchResults = null;
+      renderProjectTree();
+      return;
+    }
+
+    // Also do instant name-based filtering for responsiveness
+    state.searchResults = null;
+    renderProjectTree();
+
+    // Debounce the backend full-content search
+    _searchDebounceTimer = setTimeout(() => {
+      send({ type: "search-threads", query: raw });
+    }, 350);
+  });
+}
+
+function matchesThreadSearch(name) {
+  if (!threadSearchQuery) return true;
+  return (name || "").toLowerCase().includes(threadSearchQuery);
+}
+
+function renderSearchResults() {
+  const results = state.searchResults || [];
+  if (results.length === 0) {
+    return `<div class="px-3 py-4 text-center text-[13px] text-pi-text-dim">No threads found</div>`;
+  }
+
+  // Group results by workspace
+  const groups = {};
+  for (const r of results) {
+    const ws = r.workspace || "__current__";
+    if (!groups[ws]) groups[ws] = [];
+    groups[ws].push(r);
+  }
+
+  let html = "";
+  for (const [ws, items] of Object.entries(groups)) {
+    // Workspace header
+    const wsName = ws === "__current__"
+      ? (data.projectName || "Current workspace")
+      : ws.replace(/^--/, "").replace(/--$/, "").split("-").pop() || ws;
+    html += `
+      <div class="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-pi-text-dim">${escapeHtml(wsName)}</div>
+    `;
+
+    for (const r of items) {
+      html += `
+        <button class="thread-item flex w-full flex-col rounded-md px-3 py-2 text-left text-[13px] gap-0.5"
+                data-search-file="${escapeHtml(r.file)}" data-search-ws="${escapeHtml(r.workspace || "")}">
+          <div class="flex items-center justify-between w-full">
+            <span class="truncate font-medium" style="max-width: 170px;">${escapeHtml(truncate(r.name, 55))}</span>
+            <span class="text-[11px] text-pi-text-dim flex-shrink-0">${timeAgo(r.date)}</span>
+          </div>
+          <div class="text-[11px] text-pi-text-dim truncate" style="max-width: 210px;">${escapeHtml(r.matchSnippet || "")}</div>
+        </button>
+      `;
+    }
+  }
+  return html;
+}
+
 // ─── Project Tree (Sidebar Threads + Workspaces) ────────────
 
 function renderProjectTree() {
-  const threads = data.threads || [];
+  const projectTreeEl = document.getElementById("project-tree");
+  if (!projectTreeEl) return;
+
+  // If backend search results are available, render those instead
+  if (state.searchResults !== null) {
+    const html = renderSearchResults();
+    projectTreeEl.innerHTML = html;
+    // Attach click handlers for search results
+    projectTreeEl.querySelectorAll("[data-search-file]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const file = btn.dataset.searchFile;
+        const ws = btn.dataset.searchWs;
+        if (file) {
+          state.activeView = "threads";
+          state.viewingOldThread = true;
+          if (ws && ws !== "__current__") {
+            state.activeWorkspace = ws;
+          } else {
+            state.activeWorkspace = null;
+          }
+          send({ type: "open-thread", file });
+        }
+      });
+    });
+    renderHiddenWorkspacesBar([]);
+    return;
+  }
+
+  const allThreads = data.threads || [];
+  const threads = allThreads.filter(t => matchesThreadSearch(t.name));
   const workspaces = data.workspaces || [];
   let html = "";
 
   // ─── Current workspace (collapsible) ─────────────────────
-  const currentExpanded = state.expandedWorkspaces["__current__"] !== false;
+  const hasCurrentMatches = threadSearchQuery && threads.length > 0;
+  const currentExpanded = hasCurrentMatches || state.expandedWorkspaces["__current__"] !== false;
+  // When searching: hide current workspace if no threads match
+  const showCurrentWs = !threadSearchQuery || hasCurrentMatches;
   const branch = data.gitBranch
     ? ` <span style="color:var(--accent);">\u00b7 ${escapeHtml(data.gitBranch)}</span>`
     : "";
+
+  if (showCurrentWs) {
   html += `
     <div class="flex items-center gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md" data-ws-toggle="__current__">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="text-pi-text-muted" style="flex-shrink:0;transition:transform 0.15s;transform:rotate(${currentExpanded ? 90 : 0}deg);">
@@ -417,21 +546,24 @@ function renderProjectTree() {
   if (currentExpanded) {
     html += `<div id="ws-sessions-__current__">`;
 
-    // Current session
-    html += `
-      <button class="thread-item flex w-full items-center justify-between rounded-md px-7 py-1.5 text-left text-[13px] ${state.activeThreadIdx === -1 && state.activeView === "threads" && !state.activeWorkspace ? "active" : ""}"
+    // Current session (hidden when searching)
+    if (!threadSearchQuery) {
+      html += `
+        <button class="thread-item flex w-full items-center justify-between rounded-md px-7 py-1.5 text-left text-[13px] ${state.activeThreadIdx === -1 && state.activeView === "threads" && !state.activeWorkspace ? "active" : ""}"
               data-thread-idx="-1" data-ws="__current__">
         <span class="truncate font-medium" style="max-width: 170px; color: var(--accent);">\u25cf Current session</span>
         <span class="text-[11px] text-pi-text-dim flex-shrink-0">now</span>
       </button>
-    `;
+      `;
+    }
 
     for (let i = 0; i < threads.length; i++) {
       const t = threads[i];
-      const isActive = i === state.activeThreadIdx && state.activeView === "threads" && !state.activeWorkspace;
+      const origIdx = allThreads.indexOf(t);
+      const isActive = origIdx === state.activeThreadIdx && state.activeView === "threads" && !state.activeWorkspace;
       html += `
         <button class="thread-item flex w-full items-center justify-between rounded-md px-7 py-1.5 text-left text-[13px] ${isActive ? "active" : ""}"
-                data-thread-idx="${i}" data-ws="__current__">
+                data-thread-idx="${origIdx}" data-ws="__current__">
           <span class="truncate" style="max-width: 170px;">${escapeHtml(truncate(t.name, 55))}</span>
           <span class="text-[11px] text-pi-text-dim flex-shrink-0">${timeAgo(t.date)}</span>
         </button>
@@ -439,6 +571,7 @@ function renderProjectTree() {
     }
     html += `</div>`;
   }
+  } // end showCurrentWs
 
   // ─── Other workspaces ─────────────────────────────────────
   const cwd = data.cwd || "";
@@ -446,9 +579,21 @@ function renderProjectTree() {
   const hiddenWs = workspaces.filter(ws => ws.path !== cwd && state.hiddenWorkspaces[ws.dirName]);
 
   for (const ws of visibleWs) {
-    const isExpanded = !!state.expandedWorkspaces[ws.dirName];
-    const arrowRotation = isExpanded ? "rotate(90deg)" : "rotate(0deg)";
     const sessions = state.workspaceSessions[ws.dirName] || [];
+    const filteredSessions = sessions.filter(s => matchesThreadSearch(s.name));
+    const hasWsMatches = threadSearchQuery && filteredSessions.length > 0;
+    const sessionsLoading = threadSearchQuery && !state.workspaceSessions[ws.dirName];
+
+    // Auto-fetch sessions when searching if not yet loaded
+    if (sessionsLoading) {
+      send({ type: "get-workspace-sessions", dirName: ws.dirName });
+    }
+
+    // When searching: hide workspaces with no matches (unless still loading)
+    if (threadSearchQuery && !hasWsMatches && !sessionsLoading) continue;
+
+    const isExpanded = hasWsMatches || sessionsLoading || !!state.expandedWorkspaces[ws.dirName];
+    const arrowRotation = isExpanded ? "rotate(90deg)" : "rotate(0deg)";
 
     html += `
       <div class="flex items-center gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md" data-ws-toggle="${escapeHtml(ws.dirName)}">
@@ -468,12 +613,13 @@ function renderProjectTree() {
       if (sessions.length === 0) {
         html += `<div class="px-7 py-1.5 text-[12px] text-pi-text-dim">Loading...</div>`;
       } else {
-        for (let i = 0; i < sessions.length; i++) {
-          const s = sessions[i];
-          const isActive = state.activeWorkspace === ws.dirName && state.activeThreadIdx === i && state.activeView === "threads";
+        for (let i = 0; i < filteredSessions.length; i++) {
+          const s = filteredSessions[i];
+          const origIdx = sessions.indexOf(s);
+          const isActive = state.activeWorkspace === ws.dirName && state.activeThreadIdx === origIdx && state.activeView === "threads";
           html += `
             <button class="thread-item flex w-full items-center justify-between rounded-md px-7 py-1.5 text-left text-[13px] ${isActive ? "active" : ""}"
-                    data-thread-idx="${i}" data-ws="${escapeHtml(ws.dirName)}" data-ws-file="${escapeHtml(s.file)}">
+                    data-thread-idx="${origIdx}" data-ws="${escapeHtml(ws.dirName)}" data-ws-file="${escapeHtml(s.file)}">
               <span class="truncate" style="max-width: 170px;">${escapeHtml(truncate(s.name, 55))}</span>
               <span class="text-[11px] text-pi-text-dim flex-shrink-0">${timeAgo(s.date)}</span>
             </button>
@@ -482,6 +628,11 @@ function renderProjectTree() {
       }
       html += `</div>`;
     }
+  }
+
+  // Show "no results" when searching and nothing matches
+  if (threadSearchQuery && html.trim() === "") {
+    html = `<div class="px-3 py-4 text-center text-[13px] text-pi-text-dim">No threads found</div>`;
   }
 
   projectTreeEl.innerHTML = html;
@@ -2275,6 +2426,13 @@ window.__desktopReceive = function(message) {
     case "workspace-sessions":
       if (message.dirName) {
         state.workspaceSessions[message.dirName] = message.sessions || [];
+        renderProjectTree();
+      }
+      break;
+
+    case "search-results":
+      if (message.query && threadSearchQuery && message.query.toLowerCase() === threadSearchQuery) {
+        state.searchResults = message.results || [];
         renderProjectTree();
       }
       break;

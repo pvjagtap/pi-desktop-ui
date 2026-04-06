@@ -19,7 +19,9 @@ import { exec } from "node:child_process";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
-import { open, type GlimpseWindow } from "glimpseui";
+import { open } from "glimpseui";
+
+type GlimpseWindow = ReturnType<typeof open>;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const webDir = join(__dirname, "web");
@@ -158,8 +160,15 @@ function getSessionThreads(sessionDir: string | null) {
 					const line = content.split("\n").find(l => l.includes('"role":"user"') || l.includes('"role": "user"'));
 					if (line) {
 						const parsed = JSON.parse(line);
-						const text = parsed?.message?.content?.[0]?.text || parsed?.message?.content;
-						if (typeof text === "string" && text.length > 0) name = text.slice(0, 70).replace(/\n/g, " ");
+						const msgContent = parsed?.message?.content;
+						let text = "";
+						if (Array.isArray(msgContent)) {
+							const textBlock = msgContent.find((b: any) => b.type === "text");
+							if (textBlock?.text) text = textBlock.text;
+						} else if (typeof msgContent === "string") {
+							text = msgContent;
+						}
+						if (text.length > 0) name = text.slice(0, 70).replace(/\n/g, " ");
 					}
 				} catch {}
 				return { name, file: fp, date: stat.mtime };
@@ -331,6 +340,60 @@ function getWorkspaceSessions(dirName: string) {
 	const home = process.env.HOME || process.env.USERPROFILE || "";
 	const dirPath = join(home, ".pi", "agent", "sessions", dirName);
 	return getSessionThreads(dirPath);
+}
+
+function searchSessionThreads(sessionDir: string | null, query: string): Array<{ name: string; file: string; date: Date; matchSnippet: string }> {
+	if (!sessionDir || !existsSync(sessionDir) || !query) return [];
+	const lowerQuery = query.toLowerCase();
+	const results: Array<{ name: string; file: string; date: Date; matchSnippet: string }> = [];
+	try {
+		const files = readdirSync(sessionDir).filter(f => f.endsWith(".jsonl"));
+		for (const f of files) {
+			const fp = join(sessionDir, f);
+			const stat = statSync(fp);
+			let threadName = f.replace(".jsonl", "");
+			let matchSnippet = "";
+			try {
+				const content = readFileSync(fp, "utf-8");
+				const lines = content.split("\n");
+				let firstUserText = "";
+				for (const line of lines) {
+					if (!line.trim()) continue;
+					try {
+						const entry = JSON.parse(line);
+						if (entry.type !== "message") continue;
+						const msg = entry.message;
+						if (!msg) continue;
+						let text = "";
+						if (Array.isArray(msg.content)) {
+							for (const b of msg.content) {
+								if (b.type === "text" && b.text) text += b.text + " ";
+							}
+						} else if (typeof msg.content === "string") {
+							text = msg.content;
+						}
+						text = text.trim();
+						if (!text) continue;
+						if (msg.role === "user" && !firstUserText) firstUserText = text;
+						if (text.toLowerCase().includes(lowerQuery)) {
+							// Extract snippet around the match
+							const idx = text.toLowerCase().indexOf(lowerQuery);
+							const start = Math.max(0, idx - 30);
+							const end = Math.min(text.length, idx + query.length + 50);
+							matchSnippet = (start > 0 ? "..." : "") + text.slice(start, end).replace(/\n/g, " ") + (end < text.length ? "..." : "");
+							break;
+						}
+					} catch {}
+				}
+				if (firstUserText) threadName = firstUserText.slice(0, 70).replace(/\n/g, " ");
+				if (matchSnippet) {
+					results.push({ name: threadName, file: fp, date: stat.mtime, matchSnippet });
+				}
+			} catch {}
+		}
+	} catch {}
+	results.sort((a, b) => b.date.getTime() - a.date.getTime());
+	return results;
 }
 
 function extractSessionMessages(ctx: ExtensionContext) {
@@ -852,6 +915,39 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 						name: t.name, file: t.file, date: t.date.toISOString(),
 					}));
 					sendToWindow({ type: "workspace-sessions", dirName: msg.dirName, sessions });
+				}
+				break;
+			}
+
+			case "search-threads": {
+				if (msg.query && typeof msg.query === "string" && msg.query.length >= 2 && msg.query.length <= 200) {
+					const query = msg.query;
+					const allResults: Array<{ name: string; file: string; date: string; matchSnippet: string; workspace: string }> = [];
+
+					// Search current workspace
+					if (lastCtx) {
+						const sessionFile = (lastCtx.sessionManager as any).getSessionFile?.() ?? null;
+						const sessionDir = sessionFile ? join(sessionFile, "..") : null;
+						const results = searchSessionThreads(sessionDir, query);
+						for (const r of results) {
+							allResults.push({ name: r.name, file: r.file, date: r.date.toISOString(), matchSnippet: r.matchSnippet, workspace: "__current__" });
+						}
+					}
+
+					// Search other workspaces
+					const home = process.env.HOME || process.env.USERPROFILE || "";
+					const sessionsRoot = join(home, ".pi", "agent", "sessions");
+					const cwd = lastCtx ? (lastCtx as any).cwd || "" : "";
+					const workspaces = getWorkspaces().filter(w => w.path !== cwd);
+					for (const ws of workspaces) {
+						const wsDir = join(sessionsRoot, ws.dirName);
+						const results = searchSessionThreads(wsDir, query);
+						for (const r of results) {
+							allResults.push({ name: r.name, file: r.file, date: r.date.toISOString(), matchSnippet: r.matchSnippet, workspace: ws.dirName });
+						}
+					}
+
+					sendToWindow({ type: "search-results", query, results: allResults });
 				}
 				break;
 			}
