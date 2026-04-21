@@ -2,9 +2,9 @@
 
 A native desktop GUI for [pi](https://github.com/mariozechner/pi-coding-agent) — a fully functional chat window that mirrors your terminal session with real-time streaming, markdown rendering, and workspace management.
 
-![Pi Desktop - Chat View](assets/Screenshot_1.png)
+![Pi Desktop - Chat View](assets/Screenshot_5.png)
 
-![Pi Desktop - Code Diffs & Tools](assets/Screenshot_2.png)
+![Pi Desktop - Code Diffs & Tools](assets/Screenshot_6.png)
 
 ## Features
 
