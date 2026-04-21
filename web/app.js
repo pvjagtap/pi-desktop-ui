@@ -1669,7 +1669,7 @@ function renderWorkspaceModal() {
         <div style="padding:8px 20px 4px;">
           <div class="text-[12px] font-medium" style="color:var(--text-muted);">Recent Workspaces</div>
         </div>
-        <div style="overflow-y:auto;flex:1;padding:4px 12px 12px;">
+        <div class="scrollbar-thin" style="overflow-y:auto;flex:1;padding:4px 12px 12px;">
           ${wsListHtml || '<div style="padding:20px;text-align:center;color:var(--text-dim);">No workspaces found</div>'}
         </div>
       </div>
