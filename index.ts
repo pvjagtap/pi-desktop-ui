@@ -615,6 +615,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	let lastCommandCtx: ExtensionCommandContext | null = null;
 	let activeExplorerCwd: string | null = null; // override CWD when viewing another workspace
 	let sessionReason: string = "startup";
+	let sessionTransitioning = false; // true while a session switch is in progress (prevents window close)
 	let planMode: boolean = false;
 	let pendingDesktopSlashCommand: string | null = null; // slash command waiting to be intercepted by input event
 
@@ -1298,10 +1299,14 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		// Try built-in commands that map to ExtensionCommandContext methods
 		switch (cmdName) {
 			case "new":
+				sessionTransitioning = true;
 				await ctx.newSession();
+				sessionTransitioning = false;
 				return true;
 			case "reload":
+				sessionTransitioning = true;
 				await ctx.reload();
+				sessionTransitioning = false;
 				return true;
 			case "compact":
 				ctx.compact(cmdArgs ? { customInstructions: cmdArgs } : undefined);
@@ -1352,6 +1357,12 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			const cmd = pendingDesktopSlashCommand;
 			pendingDesktopSlashCommand = null;
 
+			// Mark session-lifecycle commands so session_shutdown doesn't close the window
+			const lcCmd = cmd.replace(/^\//,"").split(/\s/)[0];
+			if (lcCmd === "new" || lcCmd === "reload" || lcCmd === "resume") {
+				sessionTransitioning = true;
+			}
+
 			// Execute the slash command by injecting it into the terminal's input pipeline.
 			// We set the editor text to the command, then simulate an Enter keypress via
 			// process.stdin. The TUI processes this as a normal terminal submission, which
@@ -1380,6 +1391,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		const reason = (event as any).reason || "startup";
 		const previousSessionFile = (event as any).previousSessionFile || null;
 		sessionReason = reason;
+		sessionTransitioning = false; // Session started successfully — clear transition flag
 		lastCommandCtx = null; // Reset stale command context on session change
 
 		projectName = getProjectName(ctx.cwd);
@@ -1420,6 +1432,10 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
-		closeActiveWindow();
+		// Don't close the window during session transitions (new/reload/resume/fork)
+		// — the window should survive and receive the new session's data.
+		if (!sessionTransitioning) {
+			closeActiveWindow();
+		}
 	});
 }
