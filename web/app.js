@@ -1048,7 +1048,7 @@ function renderMessageHtml(msg) {
       <div class="msg-animate mb-3">
         <details class="rounded-lg border" style="border-color: var(--border);">
           <summary class="cursor-pointer px-3 py-2 text-[12px] font-medium" style="color: var(--text-muted);">
-            \uD83D\uDCAD Thinking <span class="text-[11px] font-normal" style="color: var(--text-dim);">(${msg.content.length} chars)</span>
+            <span class="material-symbols-outlined" style="font-size:14px;">psychology_alt</span> Thinking <span class="text-[11px] font-normal" style="color: var(--text-dim);">(${msg.content.length} chars)</span>
           </summary>
           <div class="border-t px-3 py-2" style="border-color: var(--border); max-height: 300px; overflow-y: auto;">
             <pre class="text-[12px] whitespace-pre-wrap" style="color:var(--text-muted);">${escapeHtml(msg.content)}</pre>
@@ -1061,8 +1061,8 @@ function renderMessageHtml(msg) {
     const statusIcon = isRunning
       ? '<span class="tool-spinner" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:4px;"></span>'
       : msg.isError
-        ? '<span style="color:#e55;">\u2717 Error</span>'
-        : '<span style="color:#3b3;">\u2713</span>';
+        ? '<span style="color:#e55;"><span class="material-symbols-outlined" style="font-size:12px;">close</span> Error</span>'
+        : '<span style="color:#3b3;"><span class="material-symbols-outlined" style="font-size:12px;">check</span></span>';
     const toolIcon = getToolIcon(msg.toolName);
     const hasEditDiffs = msg.editDiffs && msg.editDiffs.length > 0;
     const diffId = hasEditDiffs ? `diff-inline-${ensureMsgId(msg)}` : null;
@@ -1126,50 +1126,29 @@ function renderMessageHtml(msg) {
 
 function getToolIcon(toolName) {
   const icons = {
-    bash: '\u2699\uFE0F', read: '\uD83D\uDCC4', edit: '\u270F\uFE0F', write: '\uD83D\uDCDD',
-    grep: '\uD83D\uDD0D', find: '\uD83D\uDD0E', ls: '\uD83D\uDCC2', mcp: '\uD83D\uDD0C',
-    parallel_search: '\uD83C\uDF10', parallel_research: '\uD83E\uDDEA', parallel_extract: '\uD83D\uDCE5',
-    subagent: '\uD83E\uDD16', claude: '\uD83E\uDDE0', todo: '\u2611\uFE0F',
+    bash: '<span class="material-symbols-outlined" style="font-size:14px;">terminal</span>',
+    read: '<span class="material-symbols-outlined" style="font-size:14px;">description</span>',
+    edit: '<span class="material-symbols-outlined" style="font-size:14px;">edit</span>',
+    write: '<span class="material-symbols-outlined" style="font-size:14px;">edit_note</span>',
+    grep: '<span class="material-symbols-outlined" style="font-size:14px;">search</span>',
+    find: '<span class="material-symbols-outlined" style="font-size:14px;">find_in_page</span>',
+    ls: '<span class="material-symbols-outlined" style="font-size:14px;">folder_open</span>',
+    mcp: '<span class="material-symbols-outlined" style="font-size:14px;">electrical_services</span>',
+    parallel_search: '<span class="material-symbols-outlined" style="font-size:14px;">travel_explore</span>',
+    parallel_research: '<span class="material-symbols-outlined" style="font-size:14px;">science</span>',
+    parallel_extract: '<span class="material-symbols-outlined" style="font-size:14px;">download</span>',
+    subagent: '<span class="material-symbols-outlined" style="font-size:14px;">smart_toy</span>',
+    claude: '<span class="material-symbols-outlined" style="font-size:14px;">psychology</span>',
+    todo: '<span class="material-symbols-outlined" style="font-size:14px;">checklist</span>',
   };
-  return icons[toolName] || '\uD83D\uDD27';
+  return icons[toolName] || '<span class="material-symbols-outlined" style="font-size:14px;">build</span>';
 }
 
 // ─── Diff Overlay ─────────────────────────────────────────────
 
 // ─── Word-level diff engine ───────────────────────────────────
 
-function computeWordDiff(oldStr, newStr) {
-  const oldWords = oldStr.split(/(\s+)/);
-  const newWords = newStr.split(/(\s+)/);
 
-  // Simple LCS-based word diff
-  const m = oldWords.length, n = newWords.length;
-  const dp = Array.from({length: m + 1}, () => new Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = oldWords[i-1] === newWords[j-1]
-        ? dp[i-1][j-1] + 1
-        : Math.max(dp[i-1][j], dp[i][j-1]);
-    }
-  }
-
-  // Backtrack to get diff operations
-  const result = [];
-  let i = m, j = n;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldWords[i-1] === newWords[j-1]) {
-      result.unshift({ type: "same", text: oldWords[i-1] });
-      i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
-      result.unshift({ type: "add", text: newWords[j-1] });
-      j--;
-    } else {
-      result.unshift({ type: "del", text: oldWords[i-1] });
-      i--;
-    }
-  }
-  return result;
-}
 
 function renderUnifiedDiff(oldText, newText, filePath) {
   const oldLines = oldText.split("\n");
@@ -1315,7 +1294,7 @@ function showDiffOverlay(editPath, editDiffs) {
     <div class="diff-panel">
       <div class="diff-header">
         <div style="display:flex;align-items:center;gap:12px;">
-          <span style="color:var(--accent);font-weight:600;font-size:14px;">\u270F\uFE0F ${escapeHtml(fileName)}</span>
+          <span style="color:var(--accent);font-weight:600;font-size:14px;"><span class="material-symbols-outlined" style="font-size:14px;">edit</span> ${escapeHtml(fileName)}</span>
           <span style="color:#e55;font-size:12px;font-weight:600;">\u2212${stats.removed}</span>
           <span style="color:#3b3;font-size:12px;font-weight:600;">+${stats.added}</span>
           <span style="color:var(--text-dim);font-size:12px;">${editDiffs.length} edit(s)</span>
@@ -1369,7 +1348,7 @@ function renderMessages() {
     messagesEl.innerHTML = `
       <div class="flex h-full items-center justify-center">
         <div class="text-center" style="color: var(--text-dim);">
-          <div class="mb-2 text-3xl">&#x25C8;</div>
+          <div class="mb-2"><span class="material-symbols-outlined" style="font-size:36px;color:var(--accent);">diamond</span></div>
           <div class="text-sm">Start a conversation</div>
           <div class="mt-1 text-[12px]">Type a message below or use the terminal</div>
         </div>
@@ -1390,7 +1369,7 @@ function renderMessages() {
       <div class="mb-3" id="thinking-msg">
         <details open class="rounded-lg border" style="border-color: var(--border);">
           <summary class="cursor-pointer px-3 py-2 text-[12px] font-medium" style="color: var(--text-muted);">
-            &#x1F4AD; Thinking...
+            <span class="material-symbols-outlined" style="font-size:14px;">psychology_alt</span> Thinking...
           </summary>
           <div class="border-t px-3 py-2" style="border-color: var(--border);">
             <div class="text-[12px] opacity-70 whitespace-pre-wrap" style="color:var(--text-muted); max-height: 200px; overflow-y: auto;">${escapeHtml(state.thinkingText.slice(-500))}</div>
@@ -1509,7 +1488,7 @@ function renderSkillsView() {
     html += `
       <div class="skill-card rounded-lg border p-3 cursor-pointer hover:bg-pi-sidebar-hover" style="border-color: var(--border); transition: background 0.1s;" data-skill="${escapeHtml(s.name)}">
         <div class="flex items-center gap-2">
-          <span>\uD83E\uDDE9</span>
+          <span class="material-symbols-outlined" style="font-size:16px;">extension</span>
           <span class="font-semibold text-[14px]">${escapeHtml(s.name)}</span>
         </div>
         <div class="mt-1 text-[13px]" style="color: var(--text-muted);">${escapeHtml(s.desc || "No description")}</div>
@@ -1528,7 +1507,7 @@ function renderSkillsView() {
       html += `
         <div class="rounded-lg border p-3" style="border-color: var(--border); transition: background 0.1s;">
           <div class="flex items-center gap-2">
-            <span style="color: var(--accent);">\u2699</span>
+            <span class="material-symbols-outlined" style="font-size:16px;color:var(--accent);">settings</span>
             <span class="font-semibold text-[14px]">${escapeHtml(ext.name)}</span>
             <span class="text-[11px] px-1.5 py-0.5 rounded" style="background: color-mix(in srgb, ${typeColor} 15%, transparent); color: ${typeColor};">${typeLabel}</span>
           </div>
@@ -1611,7 +1590,7 @@ function renderSettingsView() {
 function renderWorkspaceView() {
   const s = data.stats || {};
   const html = `<div class="mx-auto max-w-2xl p-4">
-    <h2 class="text-lg font-semibold mb-4">\u25C8 ${escapeHtml(data.projectName)}</h2>
+    <h2 class="text-lg font-semibold mb-4"><span class="material-symbols-outlined" style="font-size:20px;">diamond</span> ${escapeHtml(data.projectName)}</h2>
     <div class="grid grid-cols-4 gap-3 mb-6">
       ${[
         [fmt(s.input || 0), "Input"],
@@ -1859,7 +1838,7 @@ function renderExplorerView() {
     html += `<div class="py-8 text-center text-sm" style="color: var(--text-dim);">No files loaded.</div>`;
   }
   for (const f of files) {
-    const icon = f.isDir ? "\uD83D\uDCC1" : "\uD83D\uDCC4";
+    const icon = f.isDir ? '<span class="material-symbols-outlined" style="font-size:14px;">folder</span>' : '<span class="material-symbols-outlined" style="font-size:14px;">description</span>';
     html += `
       <button class="flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-[13px] hover:bg-pi-sidebar-hover"
               data-explorer-path="${escapeHtml(f.path || "")}">
@@ -2134,7 +2113,7 @@ function renderAttachmentPills() {
   container.style.display = "flex";
   container.innerHTML = pendingAttachments.map((att, i) => {
     const isImage = att.mimeType.startsWith("image/");
-    const icon = isImage ? "\uD83D\uDDBC\uFE0F" : "\uD83D\uDCCE";
+    const icon = isImage ? '<span class="material-symbols-outlined" style="font-size:14px;">image</span>' : '<span class="material-symbols-outlined" style="font-size:14px;">attach_file</span>';
     return `<span class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[12px]" style="border-color:var(--border);background:var(--card-bg);">
       <span>${icon}</span>
       <span class="max-w-[120px] truncate">${escapeHtml(att.name)}</span>
@@ -2660,7 +2639,7 @@ function showPlanModeWarning(toolName, argsPreview) {
   `;
   toast.innerHTML = `
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-      <span style="font-size:16px;">\u26a0\ufe0f</span>
+      <span class="material-symbols-outlined" style="font-size:18px;color:#e55;">warning</span>
       <span style="font-weight:600;font-size:13px;color:#e55;">Plan Mode Violation</span>
       <button onclick="this.closest('#plan-mode-warning').remove()" style="margin-left:auto;color:var(--text-dim);border:none;background:none;cursor:pointer;font-size:16px;line-height:1;">&times;</button>
     </div>
@@ -2742,7 +2721,7 @@ function updateThinkingMessage() {
     div.innerHTML = `
       <details open class="rounded-lg border" style="border-color: var(--border);">
         <summary class="cursor-pointer px-3 py-2 text-[12px] font-medium" style="color: var(--text-muted);">
-          &#x1F4AD; Thinking...
+          <span class="material-symbols-outlined" style="font-size:14px;">psychology_alt</span> Thinking...
         </summary>
         <div class="border-t px-3 py-2" style="border-color: var(--border);">
           <div class="text-[12px] opacity-70 whitespace-pre-wrap" style="color:var(--text-muted); max-height: 200px; overflow-y: auto;">${escapeHtml(state.thinkingText.slice(-500))}</div>
@@ -2820,4 +2799,4 @@ inputTextEl.focus();
 
 // Request fresh data
 send({ type: "get-commands" });
-send({ type: "get-stats" });
+send({ type: "get-stats" });
