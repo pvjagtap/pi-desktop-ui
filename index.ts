@@ -1346,6 +1346,12 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(`Command placed in terminal — press Enter to run: ${cmd}`, "info");
 			}
 
+
+			// Notify desktop window so it shows feedback instead of a dead bubble
+			sendToWindow({
+				type: "slash-command-routed",
+				command: cmd,
+			});
 			// Prevent this from reaching the LLM
 			return { action: "handled" as const };
 		}
