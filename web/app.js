@@ -85,6 +85,7 @@ const state = {
   expandedWorkspaces: { "__current__": true }, // current workspace starts expanded
   workspaceSessions: {},         // { dirName: [...sessions] } - cached sessions per workspace
   activeWorkspace: null,         // dirName of workspace being viewed (null = current)
+  isReadOnly: false,             // true when viewing another workspace's thread (read-only mode)
   showWorkspaceModal: false,
   hiddenWorkspaces: (data.hiddenWorkspaces || {}),  // loaded from disk via backend
   planMode: false,                    // read-only plan mode
@@ -504,10 +505,13 @@ function renderProjectTree() {
           state.viewingOldThread = true;
           if (ws && ws !== "__current__") {
             state.activeWorkspace = ws;
+            state.isReadOnly = true;
           } else {
             state.activeWorkspace = null;
+            state.isReadOnly = false;
           }
           send({ type: "open-thread", file });
+          updateReadOnlyUI();
         }
       });
     });
@@ -604,10 +608,15 @@ function renderProjectTree() {
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
         </svg>
         <div class="min-w-0 flex-1">
-          <div class="font-medium truncate" style="color:var(--text);max-width:140px;">${escapeHtml(ws.name)}</div>
+          <div class="font-medium truncate flex items-center gap-1" style="color:var(--text);max-width:140px;">${escapeHtml(ws.name)}
+            ${state.activeWorkspace === ws.dirName ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.5;" title="Read-only — viewing archived thread"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' : ''}
+          </div>
           <div class="truncate text-[10px]" style="color:var(--text-dim);max-width:140px;">${escapeHtml(ws.path)}</div>
         </div>
-        <span class="ml-auto text-[11px] text-pi-text-dim flex-shrink-0">${ws.sessionCount}</span>
+        <button class="ws-launch-btn" data-ws-launch="${escapeHtml(ws.path)}" title="Launch pi in this workspace" style="flex-shrink:0;padding:2px 4px;border:none;background:none;cursor:pointer;border-radius:4px;color:var(--text-dim);opacity:0;transition:opacity 0.15s;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        </button>
+        <span class="text-[11px] text-pi-text-dim flex-shrink-0">${ws.sessionCount}</span>
       </div>
     `;
 
@@ -671,6 +680,7 @@ function renderProjectTree() {
 
       if (ws === "__current__") {
         state.activeWorkspace = null;
+        state.isReadOnly = false;
         // Reset explorer tree to current workspace
         state.explorerTreeExpanded = {};
         state.explorerTreeChildren = {};
@@ -679,13 +689,16 @@ function renderProjectTree() {
           state.viewingOldThread = false;
           send({ type: "get-stats" });
           renderMainContent();
+          updateReadOnlyUI();
         } else {
           state.viewingOldThread = true;
           send({ type: "open-thread", file: data.threads[idx]?.file, index: idx });
+          updateReadOnlyUI();
         }
       } else {
-        // Viewing a session from another workspace
+        // Viewing a session from another workspace (read-only)
         state.activeWorkspace = ws;
+        state.isReadOnly = true;
         // Reset explorer tree for other workspace
         state.explorerTreeExpanded = {};
         state.explorerTreeChildren = {};
@@ -697,6 +710,7 @@ function renderProjectTree() {
           // Refresh explorer tree for the new workspace
           send({ type: "nav", action: "explorer" });
         }
+        updateReadOnlyUI();
       }
     });
   });
@@ -705,12 +719,26 @@ function renderProjectTree() {
   projectTreeEl.querySelectorAll("[data-ws-toggle]").forEach(el => {
     const dirName = el.dataset.wsToggle;
     if (dirName === "__current__" || dirName === "__hidden__") return;
+    // Show launch button on hover
+    const launchBtn = el.querySelector(".ws-launch-btn");
+    if (launchBtn) {
+      el.addEventListener("mouseenter", () => { launchBtn.style.opacity = "1"; });
+      el.addEventListener("mouseleave", () => { launchBtn.style.opacity = "0"; });
+    }
     el.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       e.stopPropagation();
       showWsContextMenu(e.clientX, e.clientY, [
         { label: "Hide from sidebar", action: () => { state.hiddenWorkspaces[dirName] = true; send({ type: "set-hidden-workspaces", hiddenWorkspaces: state.hiddenWorkspaces }); renderProjectTree(); } },
       ]);
+    });
+  });
+
+  // Launch workspace buttons
+  projectTreeEl.querySelectorAll("[data-ws-launch]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      send({ type: "launch-workspace", path: btn.dataset.wsLaunch });
     });
   });
 }
@@ -894,6 +922,74 @@ function renderHiddenWorkspacesBar(hiddenWs) {
   });
 }
 
+// ─── Read-Only Workspace UI ─────────────────────────────────
+
+function updateReadOnlyUI() {
+  const isReadOnly = state.isReadOnly;
+
+  // Update input area
+  inputTextEl.disabled = isReadOnly;
+  btnSend.disabled = isReadOnly;
+  if (btnAttach) btnAttach.disabled = isReadOnly;
+
+  if (isReadOnly) {
+    inputTextEl.placeholder = "Read-only \u2014 viewing another workspace's thread";
+    inputTextEl.style.opacity = "0.5";
+    inputTextEl.style.cursor = "not-allowed";
+    btnSend.style.opacity = "0.35";
+    btnSend.style.cursor = "not-allowed";
+    if (btnAttach) { btnAttach.style.opacity = "0.35"; btnAttach.style.cursor = "not-allowed"; }
+  } else {
+    inputTextEl.placeholder = state.planMode
+      ? "Plan mode \u2014 ask pi to read, analyze, or plan (no writes)..."
+      : "Ask pi to inspect the repo, run a fix, or continue the current thread...";
+    inputTextEl.style.opacity = "";
+    inputTextEl.style.cursor = "";
+    btnSend.style.opacity = "";
+    btnSend.style.cursor = "";
+    if (btnAttach) { btnAttach.style.opacity = ""; btnAttach.style.cursor = ""; }
+  }
+
+  // Show/hide read-only banner
+  renderReadOnlyBanner();
+}
+
+function renderReadOnlyBanner() {
+  // Always remove existing banner to avoid stale event listeners
+  const existing = document.getElementById("readonly-banner");
+  if (existing) existing.remove();
+
+  if (!state.isReadOnly) return;
+
+  const ws = (data.workspaces || []).find(w => w.dirName === state.activeWorkspace);
+  const wsName = ws ? ws.name : state.activeWorkspace || "another workspace";
+  const wsPath = ws ? ws.path : "";
+
+  const banner = document.createElement("div");
+  banner.id = "readonly-banner";
+  banner.style.cssText = "display:flex;align-items:center;gap:8px;padding:6px 16px;font-size:12px;border-bottom:1px solid var(--border);flex-shrink:0;background:color-mix(in srgb, var(--accent) 6%, var(--bg));";
+  banner.innerHTML = `
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--accent);">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+    <span style="color:var(--text-muted);">Viewing <strong style="color:var(--text);">${escapeHtml(wsName)}</strong> (read-only)</span>
+    <button data-launch-from-banner="${escapeHtml(wsPath)}" style="margin-left:auto;display:flex;align-items:center;gap:4px;border:1px solid var(--border);background:none;color:var(--accent);padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;" title="Launch a new pi session in this workspace">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      Open in Pi
+    </button>
+  `;
+
+  // Insert before messages area
+  if (messagesEl.parentNode) {
+    messagesEl.parentNode.insertBefore(banner, messagesEl);
+  }
+
+  banner.querySelector("[data-launch-from-banner]")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    send({ type: "launch-workspace", path: wsPath });
+  });
+}
+
 // ─── Breadcrumb ───────────────────────────────────────────────
 
 function renderBreadcrumb() {
@@ -905,6 +1001,12 @@ function renderBreadcrumb() {
     if (ws) { projectLabel = ws.name; projectPath = ws.path || ""; }
   }
   const parts = [escapeHtml(projectLabel)];
+  if (state.isReadOnly) {
+    parts.push(`<span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium" style="background:color-mix(in srgb, var(--accent) 12%, transparent);color:var(--accent);">
+      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      read-only
+    </span>`);
+  }
   if (state.activeView === "threads") {
     if (data.gitBranch) {
       parts.push(`<span class="rounded px-2 py-0.5 text-[12px] font-medium" style="background:var(--breadcrumb-badge);">${escapeHtml(data.gitBranch)}</span>`);
@@ -1659,6 +1761,17 @@ function renderExplorerTree() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
     <span>Threads</span>
   </div>`;
+  // Read-only indicator when browsing another workspace
+  if (state.isReadOnly && state.activeWorkspace) {
+    const ws = (data.workspaces || []).find(w => w.dirName === state.activeWorkspace);
+    const wsName = ws ? ws.name : state.activeWorkspace;
+    html += `<div class="flex items-center gap-1.5 px-2 py-1.5 mb-1 rounded text-[11px]" style="color:var(--text-dim);background:color-mix(in srgb, var(--accent) 6%, var(--sidebar-bg));">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;">
+        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+      </svg>
+      <span>Browsing: ${escapeHtml(wsName)} (read-only)</span>
+    </div>`;
+  }
   if (!rootPath) {
     html += `<div class="py-4 text-center text-[12px]" style="color:var(--text-dim);">Loading…</div>`;
     explorerTreeEl.innerHTML = html;
@@ -2112,6 +2225,7 @@ document.addEventListener("paste", (e) => {
 function sendMessage() {
   const text = inputTextEl.value.trim();
   if (!text && pendingAttachments.length === 0) return;
+  if (state.isReadOnly) return; // Can't send in read-only mode
 
   hideCommandSuggestions();
 
@@ -2119,9 +2233,11 @@ function sendMessage() {
   if (state.viewingOldThread) {
     state.viewingOldThread = false;
     state.activeThreadIdx = -1;
+    state.isReadOnly = false;
     // Restore current session messages (will be rebuilt from streaming)
     state.messages = data.messages || [];
     renderProjectTree();
+    updateReadOnlyUI();
   }
 
   // Build message text with attachment paths
@@ -2244,8 +2360,11 @@ window.__desktopReceive = function(message) {
       removeEphemeralElements();
       startMermaidObserver();
       updateStreamingUI();
-      inputTextEl.disabled = false;
-      btnSend.disabled = false;
+      // Respect read-only state — don't re-enable input if viewing another workspace
+      if (!state.isReadOnly) {
+        inputTextEl.disabled = false;
+        btnSend.disabled = false;
+      }
       break;
 
     case "message-start":
@@ -2499,6 +2618,7 @@ window.__desktopReceive = function(message) {
       state.messages = message.messages || [];
       state.activeThreadIdx = -1;
       state.activeWorkspace = null;
+      state.isReadOnly = false;
       state.viewingOldThread = false;
       state.isStreaming = false;
       state.streamingText = "";
@@ -2520,6 +2640,7 @@ window.__desktopReceive = function(message) {
       renderMainContent();
       renderBreadcrumb();
       updateStreamingUI();
+      updateReadOnlyUI();
       break;
     }
   }
@@ -2577,15 +2698,17 @@ function cancelStreaming() {
 
 function updateStreamingUI() {
   // Update send button: show cancel (stop) button while streaming
-  if (state.isStreaming) {
+  if (state.isStreaming && !state.isReadOnly) {
     btnSend.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
     btnSend.title = "Cancel (Escape)";
     btnSend.style.background = "#c0392b";
+    btnSend.style.opacity = "";
     btnSend.onclick = function(e) { e.preventDefault(); cancelStreaming(); };
-  } else {
+  } else if (!state.isReadOnly) {
     btnSend.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`;
     btnSend.title = "Send";
     btnSend.style.background = '';
+    btnSend.style.opacity = "";
     btnSend.onclick = null;
   }
 
@@ -2678,8 +2801,10 @@ document.addEventListener("keydown", (e) => {
       state.viewingOldThread = false;
       state.activeThreadIdx = -1;
       state.activeWorkspace = null;
+      state.isReadOnly = false;
       state.messages = data.messages || [];
       renderMainContent();
+      updateReadOnlyUI();
     }
   }
 

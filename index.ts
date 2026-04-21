@@ -15,7 +15,7 @@ import { join, basename, dirname, extname, resolve, normalize } from "node:path"
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Key, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
@@ -612,6 +612,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	let gitBranch: string | null = null;
 	let activeWindow: GlimpseWindow | null = null;
 	let lastCtx: ExtensionContext | null = null;
+	let lastCommandCtx: ExtensionCommandContext | null = null;
 	let activeExplorerCwd: string | null = null; // override CWD when viewing another workspace
 	let sessionReason: string = "startup";
 	let planMode: boolean = false;
@@ -823,10 +824,21 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			case "send-message": {
 				const text = (msg.text || "").trim();
 				if (!text || text.length > 100_000) break;
-				// Don't prepend plan mode prefix to slash commands (e.g. /new, /compact)
 				const isSlashCommand = text.startsWith("/");
-				const finalText = (planMode && !isSlashCommand) ? PLAN_MODE_PREFIX + text : text;
-				pi.sendUserMessage(finalText);
+				if (isSlashCommand && lastCommandCtx) {
+					// Route slash commands through our dispatch function.
+					// pi.sendUserMessage() skips command dispatch, so we handle it ourselves.
+					const ctx = lastCommandCtx;
+					dispatchSlashCommand(text, ctx).then(handled => {
+						if (!handled) pi.sendUserMessage(text);
+					}).catch(() => pi.sendUserMessage(text));
+				} else if (!isSlashCommand) {
+					const finalText = planMode ? PLAN_MODE_PREFIX + text : text;
+					pi.sendUserMessage(finalText);
+				} else {
+					// No command context yet — send as-is
+					pi.sendUserMessage(text);
+				}
 				break;
 			}
 
@@ -1093,6 +1105,25 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 				}
 				break;
 			}
+
+			case "launch-workspace": {
+				if (msg.path && typeof msg.path === "string" && msg.path.length < 1000 && !msg.path.includes("..")) {
+					const targetPath = resolve(normalize(msg.path));
+					// Only launch if the directory exists
+					try {
+						if (existsSync(targetPath) && statSync(targetPath).isDirectory()) {
+							const child = spawn("pi", [], {
+								cwd: targetPath,
+								detached: true,
+								stdio: "ignore",
+								shell: true,
+							});
+							child.unref();
+						}
+					} catch { /* ignore spawn errors */ }
+				}
+				break;
+			}
 		}
 	}
 
@@ -1202,6 +1233,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	pi.registerCommand("desktop", {
 		description: "Open pi Desktop window (fully functional chat UI)",
 		handler: async (_args, ctx) => {
+			lastCommandCtx = ctx;
 			openDesktopWindow(ctx);
 		},
 	});
@@ -1209,9 +1241,65 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	pi.registerCommand("nav", {
 		description: "Open pi Desktop navigation window",
 		handler: async (_args, ctx) => {
+			lastCommandCtx = ctx;
 			openDesktopWindow(ctx);
 		},
 	});
+
+	// ─── Slash Command Dispatch for Desktop UI ───────────────
+	// pi.sendUserMessage() skips slash command dispatch (expandPromptTemplates: false).
+	// We register a hidden command that captures ExtensionCommandContext, and use it
+	// to dispatch slash commands from the desktop UI through the proper pipeline.
+
+	const registeredCommandHandlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
+
+	/** Dispatch a slash command through the proper context. Returns true if handled. */
+	async function dispatchSlashCommand(text: string, ctx: ExtensionCommandContext): Promise<boolean> {
+		if (!text.startsWith("/")) return false;
+		const spaceIdx = text.indexOf(" ", 1);
+		const cmdName = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
+		const cmdArgs = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1);
+
+		// Try our own registered handlers first
+		const ownHandler = registeredCommandHandlers.get(cmdName);
+		if (ownHandler) {
+			await ownHandler(cmdArgs, ctx);
+			return true;
+		}
+
+		// Try built-in commands that map to ExtensionCommandContext methods
+		switch (cmdName) {
+			case "new":
+				await ctx.newSession();
+				return true;
+			case "reload":
+				await ctx.reload();
+				return true;
+			case "compact":
+				ctx.compact(cmdArgs ? { customInstructions: cmdArgs } : undefined);
+				return true;
+		}
+
+		return false;
+	}
+
+	pi.registerCommand("_desktop-exec", {
+		description: "Internal: dispatch slash commands from Desktop UI",
+		handler: async (args, ctx) => {
+			lastCommandCtx = ctx;
+			if (!args) return;
+			const trimmed = args.trim();
+			if (await dispatchSlashCommand(trimmed, ctx)) return;
+			// Fallback: send as regular user message
+			pi.sendUserMessage(trimmed);
+		},
+	});
+
+	// Helper to register a command and also store its handler for desktop dispatch
+	function registerDesktopCommand(name: string, description: string, handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>) {
+		registeredCommandHandlers.set(name, handler);
+		pi.registerCommand(name, { description, handler: async (args, ctx) => { lastCommandCtx = ctx; await handler(args, ctx); } });
+	}
 
 	// ─── Keyboard Shortcut ────────────────────────────────────
 
