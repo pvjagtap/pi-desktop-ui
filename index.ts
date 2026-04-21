@@ -274,19 +274,59 @@ function getExtensions() {
 
 function decodeSessionDirName(dirName: string): string {
 	// Reverse of: `--${cwd.replace(/^[\/\\]/, "").replace(/[\/\\:]/g, "-")}--`
-	// e.g. --C--Users-Jagtprit-- → C:\Users\Jagtprit
+	// The encoding is lossy: both path separators and literal hyphens become "-".
+	// We use filesystem probing to resolve ambiguity.
 	let decoded = dirName.replace(/^--/, "").replace(/--$/, "");
-	// First segment after removing leading -- is drive letter on Windows (e.g. "C")
-	// Pattern: C--Users-Jagtprit → C:\Users\Jagtprit
-	// The double dash after drive letter was from the colon
-	const match = decoded.match(/^([A-Za-z])--(.*)$/);
-	if (match) {
-		decoded = match[1] + ":\\" + match[2].replace(/-/g, "\\");
+
+	const winMatch = decoded.match(/^([A-Za-z])--(.*)$/);
+	if (winMatch) {
+		// Windows path: drive letter + rest
+		const drive = winMatch[1] + ":\\";
+		const rest = winMatch[2];
+		if (!rest) return drive;
+
+		// Split on "-" and greedily resolve by checking which segments exist on disk
+		const parts = rest.split("-");
+		return drive + resolvePathSegments(drive, parts);
 	} else {
-		// Unix path: --home-user-project-- → /home/user/project
-		decoded = "/" + decoded.replace(/-/g, "/");
+		// Unix path
+		const parts = decoded.split("-");
+		return "/" + resolvePathSegments("/", parts);
 	}
-	return decoded;
+}
+
+/** Greedily resolve ambiguous hyphen-separated segments by probing the filesystem. */
+function resolvePathSegments(base: string, parts: string[]): string {
+	if (parts.length === 0) return "";
+
+	// Try joining progressively more parts with hyphens (greedy longest match)
+	// At each position, find the longest segment that exists as a child of the current base
+	let result: string[] = [];
+	let i = 0;
+	while (i < parts.length) {
+		let bestLen = 0;
+		// Try joining parts[i..j] with "-" to form a single path segment
+		// Check longest first for greedy match
+		for (let j = parts.length; j > i; j--) {
+			const candidate = parts.slice(i, j).join("-");
+			const testPath = join(base, ...result, candidate);
+			try {
+				if (existsSync(testPath)) {
+					bestLen = j - i;
+					break;
+				}
+			} catch {}
+		}
+		if (bestLen > 0) {
+			result.push(parts.slice(i, i + bestLen).join("-"));
+			i += bestLen;
+		} else {
+			// No match found on disk — fall back to single segment
+			result.push(parts[i]);
+			i++;
+		}
+	}
+	return result.join("\\");
 }
 
 function getWorkspaces() {
@@ -783,8 +823,9 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			case "send-message": {
 				const text = (msg.text || "").trim();
 				if (!text || text.length > 100_000) break;
-				// In plan mode, prepend read-only instruction to every message
-				const finalText = planMode ? PLAN_MODE_PREFIX + text : text;
+				// Don't prepend plan mode prefix to slash commands (e.g. /new, /compact)
+				const isSlashCommand = text.startsWith("/");
+				const finalText = (planMode && !isSlashCommand) ? PLAN_MODE_PREFIX + text : text;
 				pi.sendUserMessage(finalText);
 				break;
 			}
@@ -978,6 +1019,11 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 					} else {
 						// No sessions for this path yet
 						sendToWindow({ type: "workspace-opened", dirName: safePath, path: msg.path, sessions: [] });
+					}
+					// Update explorer CWD to the opened folder if it exists on disk
+					const resolvedFolder = resolve(normalize(msg.path));
+					if (existsSync(resolvedFolder)) {
+						activeExplorerCwd = resolvedFolder;
 					}
 				}
 				break;
@@ -1197,6 +1243,11 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		if (reason !== "startup") {
 			const messages = extractSessionMessages(ctx);
 			const stats = getTokenStats(ctx);
+			const sessionFile = (ctx.sessionManager as any).getSessionFile?.() ?? null;
+			const sessionDir = sessionFile ? join(sessionFile, "..") : null;
+			const threads = getSessionThreads(sessionDir).map(t => ({
+				name: t.name, file: t.file, date: t.date.toISOString(),
+			}));
 			sendToWindow({
 				type: "session-changed",
 				reason,
@@ -1205,6 +1256,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 				model: ctx.model?.id || "no-model",
 				messages,
 				stats,
+				threads,
 			});
 		}
 
