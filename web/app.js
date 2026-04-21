@@ -596,14 +596,17 @@ function renderProjectTree() {
     const arrowRotation = isExpanded ? "rotate(90deg)" : "rotate(0deg)";
 
     html += `
-      <div class="flex items-center gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md" data-ws-toggle="${escapeHtml(ws.dirName)}">
+      <div class="flex items-center gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md" data-ws-toggle="${escapeHtml(ws.dirName)}" title="${escapeHtml(ws.path)}">
         <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="text-pi-text-muted" style="flex-shrink:0;transition:transform 0.15s;transform:${arrowRotation};">
           <path d="M8 5l8 7-8 7z"/>
         </svg>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-pi-text-muted" style="flex-shrink:0">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
         </svg>
-        <span class="font-medium truncate" style="color:var(--text);max-width:140px;">${escapeHtml(ws.name)}</span>
+        <div class="min-w-0 flex-1">
+          <div class="font-medium truncate" style="color:var(--text);max-width:140px;">${escapeHtml(ws.name)}</div>
+          <div class="truncate text-[10px]" style="color:var(--text-dim);max-width:140px;">${escapeHtml(ws.path)}</div>
+        </div>
         <span class="ml-auto text-[11px] text-pi-text-dim flex-shrink-0">${ws.sessionCount}</span>
       </div>
     `;
@@ -691,6 +694,8 @@ function renderProjectTree() {
         const file = btn.dataset.wsFile;
         if (file) {
           send({ type: "open-thread", file, index: idx, workspace: ws });
+          // Refresh explorer tree for the new workspace
+          send({ type: "nav", action: "explorer" });
         }
       }
     });
@@ -814,6 +819,7 @@ function renderHiddenWorkspacesBar(hiddenWs) {
 
     const popover = document.createElement("div");
     popover.id = "hidden-ws-popover";
+    popover.className = "scrollbar-thin";
     popover.style.cssText = `
       position: fixed;
       left: ${barRect.left}px;
@@ -893,14 +899,18 @@ function renderHiddenWorkspacesBar(hiddenWs) {
 function renderBreadcrumb() {
   // Show active workspace name if viewing another workspace's thread
   let projectLabel = data.projectName;
+  let projectPath = data.cwd || "";
   if (state.activeWorkspace && state.activeWorkspace !== "__current__") {
     const ws = (data.workspaces || []).find(w => w.dirName === state.activeWorkspace);
-    if (ws) projectLabel = ws.name;
+    if (ws) { projectLabel = ws.name; projectPath = ws.path || ""; }
   }
   const parts = [escapeHtml(projectLabel)];
   if (state.activeView === "threads") {
     if (data.gitBranch) {
       parts.push(`<span class="rounded px-2 py-0.5 text-[12px] font-medium" style="background:var(--breadcrumb-badge);">${escapeHtml(data.gitBranch)}</span>`);
+    }
+    if (projectPath) {
+      parts.push(`<span class="truncate text-[11px]" style="color:var(--text-dim);max-width:300px;" title="${escapeHtml(projectPath)}">${escapeHtml(projectPath)}</span>`);
     }
     if (state.activeThreadIdx === -1) {
       parts.push(`<span style="color:var(--accent);">current session</span>`);
@@ -2445,10 +2455,8 @@ window.__desktopReceive = function(message) {
         state.explorerTreeRoot = null;
         state.viewingFile = null;
         data.explorerFiles = [];
-        // Re-request explorer data if explorer is active
-        if (state.activeView === "explorer") {
-          send({ type: "nav", action: "explorer" });
-        }
+        // Always refresh explorer data so it's ready when user switches to explorer
+        send({ type: "nav", action: "explorer" });
         // Add to workspaces list if not already there
         const wsPath = message.path || "";
         const wsName = wsPath.split(/[\\/]/).pop() || wsPath;
@@ -2483,6 +2491,35 @@ window.__desktopReceive = function(message) {
 
     case "plan-mode-violation": {
       showPlanModeWarning(message.toolName, message.argsPreview);
+      break;
+    }
+
+    case "session-changed": {
+      // New session started (e.g., /new command)
+      state.messages = message.messages || [];
+      state.activeThreadIdx = -1;
+      state.activeWorkspace = null;
+      state.viewingOldThread = false;
+      state.isStreaming = false;
+      state.streamingText = "";
+      state.thinkingText = "";
+      state.isThinking = false;
+      state.activeTools = [];
+      _renderCache.clear();
+      if (message.projectName) data.projectName = message.projectName;
+      if (message.model) data.model = message.model;
+      if (message.stats) {
+        data.inputTokens = message.stats.inputTokens || 0;
+        data.outputTokens = message.stats.outputTokens || 0;
+        data.cacheReadTokens = message.stats.cacheReadTokens || 0;
+        data.totalTokens = message.stats.totalTokens || 0;
+        data.totalCost = message.stats.totalCost || 0;
+      }
+      // Refresh thread list
+      if (message.threads) data.threads = message.threads;
+      renderMainContent();
+      renderBreadcrumb();
+      updateStreamingUI();
       break;
     }
   }

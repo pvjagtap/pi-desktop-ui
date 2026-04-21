@@ -42,7 +42,7 @@
     --text-muted: #6b6560;
     --text-dim: #847e78;
     --accent: #b07d4f;
-    --border: #ddd7cf;
+    --border: #c9a882;
     --card-bg: #f0ebe4;
     --input-bg: #ffffff;
     --code-bg: #eae4dc;
@@ -55,11 +55,11 @@
     --sidebar-bg: #141210;
     --sidebar-hover: #221f1b;
     --sidebar-active: #2a2622;
-    --text: #e0ddd8;
-    --text-muted: #8a8580;
-    --text-dim: #756f6a;
+    --text: #f7f4f0;
+    --text-muted: #bfb8b0;
+    --text-dim: #a09890;
     --accent: #c4956a;
-    --border: #2d2a26;
+    --border: #96794e;
     --card-bg: #1f1c18;
     --input-bg: #1a1714;
     --code-bg: #252220;
@@ -203,6 +203,10 @@
     color: var(--text);
   }
   .input-area textarea::placeholder { color: var(--text-dim); }
+  .input-area > div:first-child {
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent), 0 0 20px color-mix(in srgb, var(--accent) 15%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  }
 
   /* Spinner for tool execution */
   .tool-spinner {
@@ -411,9 +415,10 @@
 
   /* Plan Mode */
   #btn-plan-mode.plan-active {
-    background: color-mix(in srgb, var(--accent) 15%, transparent);
+    background: color-mix(in srgb, var(--accent) 25%, transparent);
     border-color: var(--accent) !important;
     color: var(--accent) !important;
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent), 0 0 20px color-mix(in srgb, var(--accent) 25%, transparent);
   }
   .plan-mode-banner {
     background: color-mix(in srgb, var(--accent) 10%, var(--bg));
@@ -527,10 +532,10 @@
       <span>PLAN MODE — Read-only. Pi will only read, search, and analyze. No file writes or edits.</span>
     </div>
 
-    <!-- Thread Header -->
-    <div id="thread-header" class="border-b border-pi-border px-6 py-4">
-      <div id="thread-label" class="text-[11px] font-medium uppercase tracking-wider text-pi-text-dim"></div>
-      <div id="thread-title" class="mt-1 text-base font-semibold text-pi-text"></div>
+    <!-- Thread Header (hidden – breadcrumb already shows this info) -->
+    <div id="thread-header" class="hidden">
+      <div id="thread-label"></div>
+      <div id="thread-title"></div>
     </div>
 
     <!-- Messages Area -->
