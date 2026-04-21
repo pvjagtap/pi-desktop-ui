@@ -1333,22 +1333,21 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	// reaches the LLM, so we can intercept and transform slash commands into natural
 	// language instructions that the LLM can act on properly.
 
-	pi.on("input", (event, _ctx) => {
+	pi.on("input", (event, ctx) => {
 		if (pendingDesktopSlashCommand && event.text === pendingDesktopSlashCommand) {
 			const cmd = pendingDesktopSlashCommand;
 			pendingDesktopSlashCommand = null;
 
-			// Transform the slash command into a natural language instruction
-			// so the LLM executes it properly instead of seeing raw /command text.
-			const spaceIdx = cmd.indexOf(" ", 1);
-			const cmdName = spaceIdx === -1 ? cmd.slice(1) : cmd.slice(1, spaceIdx);
-			const cmdArgs = spaceIdx === -1 ? "" : cmd.slice(spaceIdx + 1).trim();
+			// We can't execute other extensions' commands programmatically
+			// (pi has no executeCommand API). Instead, paste the command into
+			// the terminal editor so the user just presses Enter to run it.
+			if (ctx.hasUI) {
+				ctx.ui.setEditorText(cmd);
+				ctx.ui.notify(`Command placed in terminal — press Enter to run: ${cmd}`, "info");
+			}
 
-			const instruction = cmdArgs
-				? `Execute the /${cmdName} command with these arguments: ${cmdArgs}`
-				: `Execute the /${cmdName} command.`;
-
-			return { action: "transform" as const, text: instruction };
+			// Prevent this from reaching the LLM
+			return { action: "handled" as const };
 		}
 	});
 
