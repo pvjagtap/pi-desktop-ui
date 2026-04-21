@@ -71,6 +71,12 @@
   html, body { width: 100%; height: 100%; overflow: hidden; margin: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; }
 
+  /* Universal thin scrollbars — applies to all scrollable elements */
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+
+  /* Legacy class (still works, same rules) */
   .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
   .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
   .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
