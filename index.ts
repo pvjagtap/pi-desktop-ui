@@ -23,6 +23,11 @@ import { open } from "glimpseui";
 
 type GlimpseWindow = ReturnType<typeof open>;
 
+// Persist the Glimpse window reference across extension reloads (e.g. /new, /reload).
+// When pi starts a new session, extensions are re-instantiated — local variables die.
+// Storing on globalThis lets the new instance "adopt" the surviving window.
+const __piDesktop = (globalThis as any).__piDesktop ??= { window: null as GlimpseWindow | null };
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const webDir = join(__dirname, "web");
 
@@ -610,7 +615,7 @@ function buildDesktopHtml(data: DesktopWindowData): string {
 export default function desktopTuiExtension(pi: ExtensionAPI) {
 	let projectName = "";
 	let gitBranch: string | null = null;
-	let activeWindow: GlimpseWindow | null = null;
+	let activeWindow: GlimpseWindow | null = __piDesktop.window;
 	let lastCtx: ExtensionContext | null = null;
 	let lastCommandCtx: ExtensionCommandContext | null = null;
 	let activeExplorerCwd: string | null = null; // override CWD when viewing another workspace
@@ -631,6 +636,11 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 
 	// ─── Window Communication ─────────────────────────────────
 
+	function setActiveWindow(win: GlimpseWindow | null): void {
+		activeWindow = win;
+		__piDesktop.window = win;
+	}
+
 	function sendToWindow(message: any): void {
 		if (!activeWindow) return;
 		try {
@@ -647,7 +657,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	function closeActiveWindow(): void {
 		if (activeWindow == null) return;
 		const w = activeWindow;
-		activeWindow = null;
+		setActiveWindow(null);
 		try { w.close(); } catch {}
 		// Clear custom thinking label when desktop window closes
 		try { lastCtx?.ui?.setHiddenThinkingLabel?.(undefined as any); } catch {}
@@ -1198,17 +1208,17 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			height: 900,
 			title: "pi Desktop",
 		});
-		activeWindow = win;
+		setActiveWindow(win);
 
 		// Customize thinking block label while desktop window is open (v0.64.0)
 		try { ctx.ui.setHiddenThinkingLabel?.("thinking (visible in Desktop ◈)"); } catch {}
 
 		win.on("message", handleWindowMessage);
 		win.on("closed", () => {
-			if (activeWindow === win) activeWindow = null;
+			if (activeWindow === win) setActiveWindow(null);
 		});
 		win.on("error", () => {
-			if (activeWindow === win) activeWindow = null;
+			if (activeWindow === win) setActiveWindow(null);
 		});
 
 		ctx.ui.notify("Pi Desktop window opened. Chat from here or the window — both are synced.", "info");
@@ -1401,7 +1411,12 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		ctx.ui.setStatus("desktop", ctx.ui.theme.fg("dim", "◈ Desktop"));
 
 		// Notify desktop window of session change with reason context
-		if (reason !== "startup") {
+		if (reason !== "startup" || activeWindow) {
+			// Re-attach message handler if we adopted a window from a previous extension instance
+			if (reason === "startup" && activeWindow) {
+				activeWindow.on("message", handleWindowMessage);
+				try { ctx.ui.setHiddenThinkingLabel?.("thinking (visible in Desktop ◈)"); } catch {}
+			}
 			const messages = extractSessionMessages(ctx);
 			const stats = getTokenStats(ctx);
 			const sessionFile = (ctx.sessionManager as any).getSessionFile?.() ?? null;
