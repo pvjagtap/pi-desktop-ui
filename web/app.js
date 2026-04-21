@@ -1301,7 +1301,7 @@ function showDiffOverlay(editPath, editDiffs) {
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="color:var(--text-dim);font-size:11px;">${escapeHtml(editPath)}</span>
-          <button id="diff-close-btn" style="color:var(--text-muted);font-size:22px;cursor:pointer;padding:2px 10px;border:none;background:none;border-radius:6px;line-height:1;" onmouseover="this.style.background='var(--sidebar-hover)'" onmouseout="this.style.background='none'">&times;</button>
+          <button id="diff-close-btn" style="color:var(--text-muted);cursor:pointer;padding:4px;border:none;background:none;border-radius:6px;line-height:1;display:flex;" onmouseover="this.style.background='var(--sidebar-hover)'" onmouseout="this.style.background='none'"><span class="material-symbols-outlined msym-sm">close</span></button>
         </div>
       </div>
       <div class="diff-body scrollbar-thin">
@@ -1642,7 +1642,7 @@ function renderWorkspaceModal() {
     const isCurrent = ws.path === data.cwd;
     wsListHtml += `
       <button class="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left hover:bg-pi-sidebar-hover" style="transition: background 0.1s;" data-ws-add="${escapeHtml(ws.dirName)}" data-ws-path="${escapeHtml(ws.path)}">
-        <span class="material-symbols-outlined msym-sm" style="color:var(--accent);">folder</span>
+        <span class="material-symbols-outlined msym-sm" style="flex-shrink:0;color:var(--text-muted);">folder</span>
         <div class="min-w-0 flex-1">
           <div class="font-medium text-[14px]" style="color:var(--text);">${escapeHtml(ws.name)}${isCurrent ? ' <span style="color:var(--accent);font-size:12px;">(current)</span>' : ''}</div>
           <div class="text-[12px] truncate" style="color:var(--text-dim);">${escapeHtml(ws.path)}</div>
@@ -1657,7 +1657,7 @@ function renderWorkspaceModal() {
       <div style="background:var(--bg);border:1px solid var(--border);border-radius:12px;width:560px;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
         <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
           <div class="font-semibold text-[15px]" style="color:var(--text);">Open Workspace</div>
-          <button id="ws-modal-close" style="color:var(--text-muted);font-size:20px;cursor:pointer;padding:2px 8px;border:none;background:none;border-radius:6px;line-height:1;" onmouseover="this.style.background='var(--sidebar-hover)'" onmouseout="this.style.background='none'">&times;</button>
+          <button id="ws-modal-close" style="color:var(--text-muted);cursor:pointer;padding:4px;border:none;background:none;border-radius:6px;line-height:1;display:flex;" onmouseover="this.style.background='var(--sidebar-hover)'" onmouseout="this.style.background='none'"><span class="material-symbols-outlined msym-sm">close</span></button>
         </div>
         <div style="padding:12px 20px;border-bottom:1px solid var(--border);">
           <div class="text-[12px] font-medium" style="color:var(--text-muted);margin-bottom:6px;">Open folder path</div>
@@ -2117,7 +2117,7 @@ function renderAttachmentPills() {
     return `<span class="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[12px]" style="border-color:var(--border);background:var(--card-bg);">
       <span>${icon}</span>
       <span class="max-w-[120px] truncate">${escapeHtml(att.name)}</span>
-      <button class="ml-0.5 hover:opacity-70" data-remove-attach="${i}" title="Remove">&times;</button>
+      <button class="ml-0.5 hover:opacity-70" data-remove-attach="${i}" title="Remove"><span class="material-symbols-outlined" style="font-size:12px;">close</span></button>
     </span>`;
   }).join("");
   container.querySelectorAll("[data-remove-attach]").forEach(btn => {
@@ -2641,7 +2641,7 @@ function showPlanModeWarning(toolName, argsPreview) {
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
       <span class="material-symbols-outlined" style="font-size:18px;color:#e55;">warning</span>
       <span style="font-weight:600;font-size:13px;color:#e55;">Plan Mode Violation</span>
-      <button onclick="this.closest('#plan-mode-warning').remove()" style="margin-left:auto;color:var(--text-dim);border:none;background:none;cursor:pointer;font-size:16px;line-height:1;">&times;</button>
+      <button onclick="this.closest('#plan-mode-warning').remove()" style="margin-left:auto;color:var(--text-dim);border:none;background:none;cursor:pointer;line-height:1;display:flex;"><span class="material-symbols-outlined msym-sm">close</span></button>
     </div>
     <div style="font-size:12px;color:var(--text-muted);">
       <strong>${escapeHtml(toolName)}</strong> attempted while Plan Mode is active.
