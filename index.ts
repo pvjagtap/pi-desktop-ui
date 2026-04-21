@@ -616,6 +616,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	let activeExplorerCwd: string | null = null; // override CWD when viewing another workspace
 	let sessionReason: string = "startup";
 	let planMode: boolean = false;
+	let pendingDesktopSlashCommand: string | null = null; // slash command waiting to be intercepted by input event
 
 	const PLAN_MODE_PREFIX = `[PLAN MODE ACTIVE — You are in read-only plan mode. STRICT RULES:
 1. Do NOT use edit, write, or any tool that modifies files
@@ -825,19 +826,32 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 				const text = (msg.text || "").trim();
 				if (!text || text.length > 100_000) break;
 				const isSlashCommand = text.startsWith("/");
-				if (isSlashCommand && lastCommandCtx) {
-					// Route slash commands through our dispatch function.
-					// pi.sendUserMessage() skips command dispatch, so we handle it ourselves.
-					const ctx = lastCommandCtx;
-					dispatchSlashCommand(text, ctx).then(handled => {
-						if (!handled) pi.sendUserMessage(text);
-					}).catch(() => pi.sendUserMessage(text));
-				} else if (!isSlashCommand) {
+				if (isSlashCommand) {
+					// Try to dispatch via our built-in/registered command handlers first
+					if (lastCommandCtx) {
+						const ctx = lastCommandCtx;
+						dispatchSlashCommand(text, ctx).then(handled => {
+							if (!handled) {
+								// Not a command we handle directly. Send via sendUserMessage
+								// but set a flag so the input event handler can intercept it
+								// and return { action: "handled" } to prevent LLM processing.
+								// The input event handler will then re-send through sendUserMessage
+								// with the command text as a natural language instruction.
+								pendingDesktopSlashCommand = text;
+								pi.sendUserMessage(text);
+							}
+						}).catch(() => {
+							pendingDesktopSlashCommand = text;
+							pi.sendUserMessage(text);
+						});
+					} else {
+						// No command context yet — use input event interception
+						pendingDesktopSlashCommand = text;
+						pi.sendUserMessage(text);
+					}
+				} else {
 					const finalText = planMode ? PLAN_MODE_PREFIX + text : text;
 					pi.sendUserMessage(finalText);
-				} else {
-					// No command context yet — send as-is
-					pi.sendUserMessage(text);
 				}
 				break;
 			}
@@ -1278,6 +1292,9 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			case "compact":
 				ctx.compact(cmdArgs ? { customInstructions: cmdArgs } : undefined);
 				return true;
+			case "quit":
+				ctx.shutdown();
+				return true;
 		}
 
 		return false;
@@ -1308,6 +1325,31 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		handler: async (ctx) => {
 			openDesktopWindow(ctx);
 		},
+	});
+
+	// ─── Input Event: Intercept Slash Commands from Desktop UI ───
+	// pi.sendUserMessage() uses expandPromptTemplates: false, which skips slash command
+	// dispatch and prompt template expansion. The input event fires BEFORE the text
+	// reaches the LLM, so we can intercept and transform slash commands into natural
+	// language instructions that the LLM can act on properly.
+
+	pi.on("input", (event, _ctx) => {
+		if (pendingDesktopSlashCommand && event.text === pendingDesktopSlashCommand) {
+			const cmd = pendingDesktopSlashCommand;
+			pendingDesktopSlashCommand = null;
+
+			// Transform the slash command into a natural language instruction
+			// so the LLM executes it properly instead of seeing raw /command text.
+			const spaceIdx = cmd.indexOf(" ", 1);
+			const cmdName = spaceIdx === -1 ? cmd.slice(1) : cmd.slice(1, spaceIdx);
+			const cmdArgs = spaceIdx === -1 ? "" : cmd.slice(spaceIdx + 1).trim();
+
+			const instruction = cmdArgs
+				? `Execute the /${cmdName} command with these arguments: ${cmdArgs}`
+				: `Execute the /${cmdName} command.`;
+
+			return { action: "transform" as const, text: instruction };
+		}
 	});
 
 	// ─── Session Lifecycle ────────────────────────────────────
