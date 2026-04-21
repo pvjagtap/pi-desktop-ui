@@ -669,6 +669,20 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		const msg = event.message;
 		if (msg.role === "assistant") {
 			sendToWindow({ type: "message-start", role: "assistant" });
+		} else if (msg.role === "user") {
+			// Forward user messages from steers (e.g. subagent completion)
+			// to the desktop window so they appear in the chat.
+			let text = "";
+			if (typeof msg.content === "string") {
+				text = msg.content;
+			} else if (Array.isArray(msg.content)) {
+				for (const block of msg.content) {
+					if ((block as any).type === "text") text += (block as any).text;
+				}
+			}
+			if (text) {
+				sendToWindow({ type: "steer-message", content: text });
+			}
 		}
 	});
 
@@ -1366,6 +1380,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		const reason = (event as any).reason || "startup";
 		const previousSessionFile = (event as any).previousSessionFile || null;
 		sessionReason = reason;
+		lastCommandCtx = null; // Reset stale command context on session change
 
 		projectName = getProjectName(ctx.cwd);
 		lastCtx = ctx;

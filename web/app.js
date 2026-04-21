@@ -1146,10 +1146,6 @@ function getToolIcon(toolName) {
 
 // ─── Diff Overlay ─────────────────────────────────────────────
 
-// ─── Word-level diff engine ───────────────────────────────────
-
-
-
 function renderUnifiedDiff(oldText, newText, filePath) {
   const oldLines = oldText.split("\n");
   const newLines = newText.split("\n");
@@ -1192,6 +1188,10 @@ function renderUnifiedDiff(oldText, newText, filePath) {
     }
   }
 
+  // Safe accessors with bounds guard
+  function hOld(num) { return highlightedOldLines[num - 1] || ""; }
+  function hNew(num) { return highlightedNewLines[num - 1] || ""; }
+
   // Group into chunks: changed/added/deleted lines, or runs of unchanged
   let leftHtml = "";
   let rightHtml = "";
@@ -1211,36 +1211,36 @@ function renderUnifiedDiff(oldText, newText, filePath) {
         // Show first CONTEXT, collapse middle, show last CONTEXT
         for (let j = runStart; j < runStart + CONTEXT; j++) {
           const ln = pairs[j];
-          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${highlightedOldLines[ln.oldNum - 1]}</span></div>`;
-          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${highlightedNewLines[ln.newNum - 1]}</span></div>`;
+          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${hOld(ln.oldNum)}</span></div>`;
+          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${hNew(ln.newNum)}</span></div>`;
         }
         const hidden = runLen - CONTEXT * 2;
         leftHtml += `<div class="diff-collapsed">\u22EF ${hidden} unchanged lines \u22EF</div>`;
         rightHtml += `<div class="diff-collapsed">\u22EF ${hidden} unchanged lines \u22EF</div>`;
         for (let j = i - CONTEXT; j < i; j++) {
           const ln = pairs[j];
-          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${highlightedOldLines[ln.oldNum - 1]}</span></div>`;
-          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${highlightedNewLines[ln.newNum - 1]}</span></div>`;
+          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${hOld(ln.oldNum)}</span></div>`;
+          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${hNew(ln.newNum)}</span></div>`;
         }
       } else {
         for (let j = runStart; j < i; j++) {
           const ln = pairs[j];
-          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${highlightedOldLines[ln.oldNum - 1]}</span></div>`;
-          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${highlightedNewLines[ln.newNum - 1]}</span></div>`;
+          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${hOld(ln.oldNum)}</span></div>`;
+          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${hNew(ln.newNum)}</span></div>`;
         }
       }
     } else if (p.type === "changed") {
       // Use syntax-highlighted lines; word-diff overlays would break hljs spans
-      leftHtml += `<div class="diff-line diff-line-removed"><span class="diff-line-num">${p.oldNum}</span><span class="diff-line-content">${highlightedOldLines[p.oldNum - 1]}</span></div>`;
-      rightHtml += `<div class="diff-line diff-line-added"><span class="diff-line-num">${p.newNum}</span><span class="diff-line-content">${highlightedNewLines[p.newNum - 1]}</span></div>`;
+      leftHtml += `<div class="diff-line diff-line-removed"><span class="diff-line-num">${p.oldNum}</span><span class="diff-line-content">${hOld(p.oldNum)}</span></div>`;
+      rightHtml += `<div class="diff-line diff-line-added"><span class="diff-line-num">${p.newNum}</span><span class="diff-line-content">${hNew(p.newNum)}</span></div>`;
       i++;
     } else if (p.type === "deleted") {
-      leftHtml += `<div class="diff-line diff-line-removed"><span class="diff-line-num">${p.oldNum}</span><span class="diff-line-content">${highlightedOldLines[p.oldNum - 1]}</span></div>`;
+      leftHtml += `<div class="diff-line diff-line-removed"><span class="diff-line-num">${p.oldNum}</span><span class="diff-line-content">${hOld(p.oldNum)}</span></div>`;
       rightHtml += `<div class="diff-line diff-empty-line"></div>`;
       i++;
     } else if (p.type === "added") {
       leftHtml += `<div class="diff-line diff-empty-line"></div>`;
-      rightHtml += `<div class="diff-line diff-line-added"><span class="diff-line-num">${p.newNum}</span><span class="diff-line-content">${highlightedNewLines[p.newNum - 1]}</span></div>`;
+      rightHtml += `<div class="diff-line diff-line-added"><span class="diff-line-num">${p.newNum}</span><span class="diff-line-content">${hNew(p.newNum)}</span></div>`;
       i++;
     } else {
       i++;
@@ -2579,6 +2579,18 @@ window.__desktopReceive = function(message) {
 
     case "plan-mode-violation": {
       showPlanModeWarning(message.toolName, message.argsPreview);
+      break;
+    }
+
+    case "steer-message": {
+      // Steer messages from subagent completion, terminal input, etc.
+      // Show as a distinct info-style message in the chat.
+      const steerContent = message.content || "";
+      if (steerContent && state.activeView === "threads" && !state.viewingOldThread) {
+        const steerMsg = { role: "user", content: steerContent };
+        state.messages.push(steerMsg);
+        appendMessage(steerMsg);
+      }
       break;
     }
     case "session-changed": {
