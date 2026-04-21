@@ -4,7 +4,7 @@ A native desktop GUI for [pi](https://github.com/mariozechner/pi-coding-agent) â
 
 ![Pi Desktop - Chat View](assets/Screenshot_5.png)
 
-![Pi Desktop - Code Diffs & Tools](assets/Screenshot_6.png)
+![Pi Desktop - Code Diffs & Tools](assets/Screenshot_2.png)
 
 ## Features
 
