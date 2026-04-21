@@ -2581,18 +2581,6 @@ window.__desktopReceive = function(message) {
       showPlanModeWarning(message.toolName, message.argsPreview);
       break;
     }
-
-    case "slash-command-routed": {
-      // Command was pasted into the terminal editor — show feedback in chat
-      const cmd = message.command || "/command";
-      const feedbackMsg = { role: "assistant", content: `\u2139\uFE0F **${cmd}** has been placed in the terminal. Switch to the terminal and press Enter to run it.` };
-      state.messages.push(feedbackMsg);
-      if (state.activeView === "threads" && !state.viewingOldThread) {
-        appendMessage(feedbackMsg);
-      }
-      break;
-    }
-
     case "session-changed": {
       // New session started (e.g., /new command)
       state.messages = message.messages || [];

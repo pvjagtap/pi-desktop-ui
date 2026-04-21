@@ -1338,21 +1338,20 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			const cmd = pendingDesktopSlashCommand;
 			pendingDesktopSlashCommand = null;
 
-			// We can't execute other extensions' commands programmatically
-			// (pi has no executeCommand API). Instead, paste the command into
-			// the terminal editor so the user just presses Enter to run it.
+			// Execute the slash command by injecting it into the terminal's input pipeline.
+			// We set the editor text to the command, then simulate an Enter keypress via
+			// process.stdin. The TUI processes this as a normal terminal submission, which
+			// calls session.prompt() with expandPromptTemplates: true — the proper path
+			// that dispatches extension commands, skill commands, and prompt templates.
 			if (ctx.hasUI) {
 				ctx.ui.setEditorText(cmd);
-				ctx.ui.notify(`Command placed in terminal — press Enter to run: ${cmd}`, "info");
+				// Schedule Enter keypress after current prompt() call returns
+				setTimeout(() => {
+					try { process.stdin.emit("data", String.fromCharCode(13)); } catch {}
+				}, 50);
 			}
 
-
-			// Notify desktop window so it shows feedback instead of a dead bubble
-			sendToWindow({
-				type: "slash-command-routed",
-				command: cmd,
-			});
-			// Prevent this from reaching the LLM
+			// Prevent the current sendUserMessage call from reaching the LLM
 			return { action: "handled" as const };
 		}
 	});
