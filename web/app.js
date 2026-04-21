@@ -1185,9 +1185,28 @@ function computeWordDiff(oldStr, newStr) {
   return result;
 }
 
-function renderUnifiedDiff(oldText, newText) {
+function renderUnifiedDiff(oldText, newText, filePath) {
   const oldLines = oldText.split("\n");
   const newLines = newText.split("\n");
+
+  // Syntax-highlight full blocks, then split into lines
+  var highlightedOldLines = oldLines.map(escapeHtml);
+  var highlightedNewLines = newLines.map(escapeHtml);
+  if (typeof hljs !== "undefined" && filePath) {
+    var ext = (filePath.split(".").pop() || "").toLowerCase();
+    var lang = EXT_TO_LANG[ext] || "";
+    if (lang && hljs.getLanguage(lang)) {
+      try {
+        // Highlight each line individually so spans don't leak across lines
+        highlightedOldLines = oldLines.map(function(line) {
+          try { return hljs.highlight(line, { language: lang }).value; } catch(e) { return escapeHtml(line); }
+        });
+        highlightedNewLines = newLines.map(function(line) {
+          try { return hljs.highlight(line, { language: lang }).value; } catch(e) { return escapeHtml(line); }
+        });
+      } catch(e) { /* fallback to escaped */ }
+    }
+  }
 
   // Build line pairs using simple LCS for line-level alignment
   const pairs = [];
@@ -1227,47 +1246,36 @@ function renderUnifiedDiff(oldText, newText) {
         // Show first CONTEXT, collapse middle, show last CONTEXT
         for (let j = runStart; j < runStart + CONTEXT; j++) {
           const ln = pairs[j];
-          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${escapeHtml(ln.old)}</span></div>`;
-          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${escapeHtml(ln.new)}</span></div>`;
+          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${highlightedOldLines[ln.oldNum - 1]}</span></div>`;
+          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${highlightedNewLines[ln.newNum - 1]}</span></div>`;
         }
         const hidden = runLen - CONTEXT * 2;
         leftHtml += `<div class="diff-collapsed">\u22EF ${hidden} unchanged lines \u22EF</div>`;
         rightHtml += `<div class="diff-collapsed">\u22EF ${hidden} unchanged lines \u22EF</div>`;
         for (let j = i - CONTEXT; j < i; j++) {
           const ln = pairs[j];
-          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${escapeHtml(ln.old)}</span></div>`;
-          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${escapeHtml(ln.new)}</span></div>`;
+          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${highlightedOldLines[ln.oldNum - 1]}</span></div>`;
+          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${highlightedNewLines[ln.newNum - 1]}</span></div>`;
         }
       } else {
         for (let j = runStart; j < i; j++) {
           const ln = pairs[j];
-          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${escapeHtml(ln.old)}</span></div>`;
-          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${escapeHtml(ln.new)}</span></div>`;
+          leftHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.oldNum}</span><span class="diff-line-content">${highlightedOldLines[ln.oldNum - 1]}</span></div>`;
+          rightHtml += `<div class="diff-line diff-line-unchanged"><span class="diff-line-num">${ln.newNum}</span><span class="diff-line-content">${highlightedNewLines[ln.newNum - 1]}</span></div>`;
         }
       }
     } else if (p.type === "changed") {
-      const wordDiff = computeWordDiff(p.old, p.new);
-      let oldWords = "", newWords = "";
-      for (const op of wordDiff) {
-        if (op.type === "same") {
-          oldWords += escapeHtml(op.text);
-          newWords += escapeHtml(op.text);
-        } else if (op.type === "del") {
-          oldWords += `<span class="diff-word-removed">${escapeHtml(op.text)}</span>`;
-        } else {
-          newWords += `<span class="diff-word-added">${escapeHtml(op.text)}</span>`;
-        }
-      }
-      leftHtml += `<div class="diff-line diff-line-removed"><span class="diff-line-num">${p.oldNum}</span><span class="diff-line-content">${oldWords}</span></div>`;
-      rightHtml += `<div class="diff-line diff-line-added"><span class="diff-line-num">${p.newNum}</span><span class="diff-line-content">${newWords}</span></div>`;
+      // Use syntax-highlighted lines; word-diff overlays would break hljs spans
+      leftHtml += `<div class="diff-line diff-line-removed"><span class="diff-line-num">${p.oldNum}</span><span class="diff-line-content">${highlightedOldLines[p.oldNum - 1]}</span></div>`;
+      rightHtml += `<div class="diff-line diff-line-added"><span class="diff-line-num">${p.newNum}</span><span class="diff-line-content">${highlightedNewLines[p.newNum - 1]}</span></div>`;
       i++;
     } else if (p.type === "deleted") {
-      leftHtml += `<div class="diff-line diff-line-removed"><span class="diff-line-num">${p.oldNum}</span><span class="diff-line-content">${escapeHtml(p.old)}</span></div>`;
+      leftHtml += `<div class="diff-line diff-line-removed"><span class="diff-line-num">${p.oldNum}</span><span class="diff-line-content">${highlightedOldLines[p.oldNum - 1]}</span></div>`;
       rightHtml += `<div class="diff-line diff-empty-line"></div>`;
       i++;
     } else if (p.type === "added") {
       leftHtml += `<div class="diff-line diff-empty-line"></div>`;
-      rightHtml += `<div class="diff-line diff-line-added"><span class="diff-line-num">${p.newNum}</span><span class="diff-line-content">${escapeHtml(p.new)}</span></div>`;
+      rightHtml += `<div class="diff-line diff-line-added"><span class="diff-line-num">${p.newNum}</span><span class="diff-line-content">${highlightedNewLines[p.newNum - 1]}</span></div>`;
       i++;
     } else {
       i++;
@@ -1305,7 +1313,7 @@ function showDiffOverlay(editPath, editDiffs) {
       <div class="diff-edit-block" style="display:flex;flex-direction:column;">
         ${labelHtml}
         <div style="font-family:'SF Mono','Cascadia Code','Fira Code','Consolas',monospace;font-size:13px;line-height:1.6;display:flex;flex-direction:column;flex:1;">
-          ${renderUnifiedDiff(diff.oldText || "", diff.newText || "")}
+          ${renderUnifiedDiff(diff.oldText || "", diff.newText || "", editPath)}
         </div>
       </div>
     `;
