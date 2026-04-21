@@ -1,0 +1,8 @@
+node_modules/
+.git/
+.history/
+.agents/
+.rag-index/
+*.log
+copilot_all_tools.jsonl
+test-dummy.txt
