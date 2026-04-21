@@ -536,12 +536,8 @@ function renderProjectTree() {
   if (showCurrentWs) {
   html += `
     <div class="flex items-center gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md" data-ws-toggle="__current__">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="text-pi-text-muted" style="flex-shrink:0;transition:transform 0.15s;transform:rotate(${currentExpanded ? 90 : 0}deg);">
-        <path d="M8 5l8 7-8 7z"/>
-      </svg>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-pi-text-muted" style="flex-shrink:0">
-        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-      </svg>
+      <span class="material-symbols-outlined msym-xs text-pi-text-muted" style="transition:transform 0.15s;transform:rotate(${currentExpanded ? 90 : 0}deg);">chevron_right</span>
+      <span class="material-symbols-outlined msym-xs text-pi-text-muted">folder</span>
       <span class="font-medium" style="color:var(--text);">${escapeHtml(data.projectName || "")}</span>${branch}
     </div>
   `;
@@ -601,20 +597,16 @@ function renderProjectTree() {
 
     html += `
       <div class="flex items-center gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md" data-ws-toggle="${escapeHtml(ws.dirName)}" title="${escapeHtml(ws.path)}">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="text-pi-text-muted" style="flex-shrink:0;transition:transform 0.15s;transform:${arrowRotation};">
-          <path d="M8 5l8 7-8 7z"/>
-        </svg>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-pi-text-muted" style="flex-shrink:0">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-        </svg>
+        <span class="material-symbols-outlined msym-xs text-pi-text-muted" style="transition:transform 0.15s;transform:${arrowRotation};">${isExpanded ? 'expand_more' : 'chevron_right'}</span>
+        <span class="material-symbols-outlined msym-xs text-pi-text-muted">folder</span>
         <div class="min-w-0 flex-1">
           <div class="font-medium truncate flex items-center gap-1" style="color:var(--text);max-width:140px;">${escapeHtml(ws.name)}
-            ${state.activeWorkspace === ws.dirName ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:0.5;" title="Read-only — viewing archived thread"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' : ''}
+            ${state.activeWorkspace === ws.dirName ? '<span class="material-symbols-outlined" style="font-size:12px;opacity:0.5;" title="Read-only">lock</span>' : ''}
           </div>
           <div class="truncate text-[10px]" style="color:var(--text-dim);max-width:140px;">${escapeHtml(ws.path)}</div>
         </div>
         <button class="ws-launch-btn" data-ws-launch="${escapeHtml(ws.path)}" title="Launch pi in this workspace" style="flex-shrink:0;padding:2px 4px;border:none;background:none;cursor:pointer;border-radius:4px;color:var(--text-dim);opacity:0;transition:opacity 0.15s;">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          <span class="material-symbols-outlined" style="font-size:14px;">open_in_new</span>
         </button>
         <span class="text-[11px] text-pi-text-dim flex-shrink-0">${ws.sessionCount}</span>
       </div>
@@ -829,9 +821,7 @@ function renderHiddenWorkspacesBar(hiddenWs) {
   bar.style.cssText = "border-top:1px solid var(--border);padding:4px 8px;flex-shrink:0;";
   bar.innerHTML = `
     <div class="flex items-center gap-2 px-3 py-2 text-[12px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md sidebar-expanded-only" style="color:var(--text-muted);">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;">
-        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
-      </svg>
+      <span class="material-symbols-outlined" style="font-size:14px;">visibility_off</span>
       <span>Hidden workspaces</span>
       <span class="ml-auto text-[11px]">${hiddenWs.length}</span>
     </div>
@@ -867,9 +857,7 @@ function renderHiddenWorkspacesBar(hiddenWs) {
     for (const ws of hiddenWs) {
       popHtml += `
         <div class="flex items-center gap-2 px-3 py-2 text-[13px] cursor-pointer hover:bg-pi-sidebar-hover rounded-md" style="color:var(--text-muted);opacity:0.75;transition:opacity 0.15s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.75'" data-unhide-ws="${escapeHtml(ws.dirName)}">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          </svg>
+          <span class="material-symbols-outlined" style="font-size:14px;">folder</span>
           <span class="truncate" style="max-width:130px;">${escapeHtml(ws.name)}</span>
           <span class="ml-auto text-[11px]" style="color:var(--text-dim);">${ws.sessionCount}</span>
         </div>
@@ -969,12 +957,10 @@ function renderReadOnlyBanner() {
   banner.id = "readonly-banner";
   banner.style.cssText = "display:flex;align-items:center;gap:8px;padding:6px 16px;font-size:12px;border-bottom:1px solid var(--border);flex-shrink:0;background:color-mix(in srgb, var(--accent) 6%, var(--bg));";
   banner.innerHTML = `
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--accent);">
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-    </svg>
+    <span class="material-symbols-outlined msym-xs" style="color:var(--accent);">lock</span>
     <span style="color:var(--text-muted);">Viewing <strong style="color:var(--text);">${escapeHtml(wsName)}</strong> (read-only)</span>
     <button data-launch-from-banner="${escapeHtml(wsPath)}" style="margin-left:auto;display:flex;align-items:center;gap:4px;border:1px solid var(--border);background:none;color:var(--accent);padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;" title="Launch a new pi session in this workspace">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      <span class="material-symbols-outlined" style="font-size:12px;">open_in_new</span>
       Open in Pi
     </button>
   `;
@@ -1003,7 +989,7 @@ function renderBreadcrumb() {
   const parts = [escapeHtml(projectLabel)];
   if (state.isReadOnly) {
     parts.push(`<span class="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium" style="background:color-mix(in srgb, var(--accent) 12%, transparent);color:var(--accent);">
-      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span class="material-symbols-outlined" style="font-size:11px;">lock</span>
       read-only
     </span>`);
   }
@@ -1677,9 +1663,7 @@ function renderWorkspaceModal() {
     const isCurrent = ws.path === data.cwd;
     wsListHtml += `
       <button class="flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left hover:bg-pi-sidebar-hover" style="transition: background 0.1s;" data-ws-add="${escapeHtml(ws.dirName)}" data-ws-path="${escapeHtml(ws.path)}">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--accent);">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-        </svg>
+        <span class="material-symbols-outlined msym-sm" style="color:var(--accent);">folder</span>
         <div class="min-w-0 flex-1">
           <div class="font-medium text-[14px]" style="color:var(--text);">${escapeHtml(ws.name)}${isCurrent ? ' <span style="color:var(--accent);font-size:12px;">(current)</span>' : ''}</div>
           <div class="text-[12px] truncate" style="color:var(--text-dim);">${escapeHtml(ws.path)}</div>
@@ -1766,7 +1750,7 @@ function renderExplorerTree() {
   const rootPath = state.explorerTreeRoot;
   // Back button to return to threads
   let html = `<div class="flex items-center gap-1.5 px-2 py-1.5 mb-1 cursor-pointer hover:bg-pi-sidebar-hover rounded text-[12px]" id="explorer-tree-back" style="color:var(--text-muted);">
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+    <span class="material-symbols-outlined msym-xs">chevron_left</span>
     <span>Threads</span>
   </div>`;
   // Read-only indicator when browsing another workspace
@@ -1774,9 +1758,7 @@ function renderExplorerTree() {
     const ws = (data.workspaces || []).find(w => w.dirName === state.activeWorkspace);
     const wsName = ws ? ws.name : state.activeWorkspace;
     html += `<div class="flex items-center gap-1.5 px-2 py-1.5 mb-1 rounded text-[11px]" style="color:var(--text-dim);background:color-mix(in srgb, var(--accent) 6%, var(--sidebar-bg));">
-      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;">
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-      </svg>
+      <span class="material-symbols-outlined" style="font-size:12px;">lock</span>
       <span>Browsing: ${escapeHtml(wsName)} (read-only)</span>
     </div>`;
   }
@@ -1812,12 +1794,12 @@ function renderTreeNodes(entries, depth) {
     const isExpanded = !!state.explorerTreeExpanded[f.path];
     if (f.isDir) {
       const chevron = isExpanded
-        ? `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;"><path d="M7 10l5 5 5-5z"/></svg>`
-        : `<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;"><path d="M10 7l5 5-5 5z"/></svg>`;
+        ? `<span class="material-symbols-outlined" style="font-size:12px;">expand_more</span>`
+        : `<span class="material-symbols-outlined" style="font-size:12px;">chevron_right</span>`;
       html += `<div class="flex items-center gap-1 cursor-pointer hover:bg-pi-sidebar-hover rounded px-1 py-[2px] text-[12px]"
         style="padding-left:${indent + 4}px;" data-tree-dir="${escapeHtml(f.path)}">
         ${chevron}
-        <span style="color:var(--accent);flex-shrink:0;">📁</span>
+        <span style="color:var(--accent);flex-shrink:0;"><span class="material-symbols-outlined" style="font-size:14px;">folder</span></span>
         <span class="truncate" style="color:var(--text);">${escapeHtml(f.name)}</span>
       </div>`;
       if (isExpanded) {
@@ -1832,7 +1814,7 @@ function renderTreeNodes(entries, depth) {
       html += `<div class="flex items-center gap-1 cursor-pointer hover:bg-pi-sidebar-hover rounded px-1 py-[2px] text-[12px]"
         style="padding-left:${indent + 4}px;" data-tree-file="${escapeHtml(f.path)}">
         <span style="flex-shrink:0;width:10px;"></span>
-        <span style="flex-shrink:0;">📄</span>
+        <span style="flex-shrink:0;"><span class="material-symbols-outlined" style="font-size:14px;">description</span></span>
         <span class="truncate" style="color:var(--text-muted);">${escapeHtml(f.name)}</span>
       </div>`;
     }
@@ -1926,10 +1908,10 @@ function renderFileViewer() {
   html += `
     <div style="display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);flex-shrink:0;">
       <button id="file-viewer-back" style="background:none;border:1px solid var(--border);border-radius:6px;padding:4px 10px;cursor:pointer;color:var(--text-muted);font-size:13px;display:flex;align-items:center;gap:4px;" title="Back to file list">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        <span class="material-symbols-outlined msym-xs">arrow_back</span>
         Back
       </button>
-      <span style="font-size:14px;font-weight:600;color:var(--text);">📄 ${escapeHtml(fileName)}</span>
+      <span style="font-size:14px;font-weight:600;color:var(--text);"><span class="material-symbols-outlined msym-sm">description</span> ${escapeHtml(fileName)}</span>
       <span style="font-size:12px;color:var(--text-dim);margin-left:auto;">${escapeHtml(fileSize)}</span>
       <span style="font-size:11px;color:var(--text-dim);font-family:monospace;">${escapeHtml(f.path || "")}</span>
     </div>
@@ -2707,13 +2689,13 @@ function cancelStreaming() {
 function updateStreamingUI() {
   // Update send button: show cancel (stop) button while streaming
   if (state.isStreaming && !state.isReadOnly) {
-    btnSend.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
+    btnSend.innerHTML = `<span class="material-symbols-outlined msym-sm">stop</span>`;
     btnSend.title = "Cancel (Escape)";
     btnSend.style.background = "#c0392b";
     btnSend.style.opacity = "";
     btnSend.onclick = function(e) { e.preventDefault(); cancelStreaming(); };
   } else if (!state.isReadOnly) {
-    btnSend.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>`;
+    btnSend.innerHTML = `<span class="material-symbols-outlined msym-sm">arrow_upward</span>`;
     btnSend.title = "Send";
     btnSend.style.background = '';
     btnSend.style.opacity = "";
@@ -2838,4 +2820,4 @@ inputTextEl.focus();
 
 // Request fresh data
 send({ type: "get-commands" });
-send({ type: "get-stats" });
+send({ type: "get-stats" });
