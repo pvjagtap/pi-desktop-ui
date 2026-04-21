@@ -1,6 +1,6 @@
 {
   "name": "pi-desktop-ui",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "description": "A native desktop GUI for pi — full chat window with real-time streaming, markdown rendering, and workspace management",
   "keywords": ["pi-package"],
