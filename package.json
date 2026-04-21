@@ -1,12 +1,20 @@
 {
   "name": "pi-desktop-ui",
-  "private": true,
-  "version": "1.0.1",
+  "version": "1.1.0",
   "type": "module",
+  "description": "A native desktop GUI for pi — full chat window with real-time streaming, markdown rendering, and workspace management",
+  "keywords": ["pi-package"],
+  "author": "pvjagtap",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pvjagtap/pi-desktop-ui"
+  },
   "pi": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/pvjagtap/pi-desktop-ui/main/assets/Screenshot_1.png"
   },
   "dependencies": {
     "glimpseui": "^0.6.0",
