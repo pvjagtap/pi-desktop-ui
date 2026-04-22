@@ -64,7 +64,7 @@ var _renderCache = new Map(); // key: message content hash → rendered HTML
 
 function getMsgCacheKey(msg) {
   // Simple cache key from role + content (fast string concat)
-  return msg.role + '||' + (msg.content || '') + '||' + (msg.toolName || '') + '||' + (msg.status || '') + '||' + (msg.isError ? '1' : '0');
+  return msg.role + '||' + (msg.content || '') + '||' + (msg.toolName || '') + '||' + (msg.status || '') + '||' + (msg.isError ? '1' : '0') + '||' + (msg.command || '');
 }
 
 // ─── State ────────────────────────────────────────────────────
@@ -1117,6 +1117,27 @@ function renderMessageHtml(msg) {
         </details>
       </div>
     `;
+  } else if (msg.role === "system-cmd") {
+    // Command feedback message (slash command results)
+    const isSuccess = msg.success !== false;
+    const icon = isSuccess
+      ? '<span class="material-symbols-outlined" style="font-size:14px;">check_circle</span>'
+      : '<span class="material-symbols-outlined" style="font-size:14px;">error</span>';
+    const borderColor = isSuccess ? 'var(--accent)' : '#e55';
+    const label = msg.command ? `/${escapeHtml(msg.command)}` : 'Command';
+    result = `
+      <div class="msg-animate mb-3">
+        <div class="rounded-lg border px-4 py-3" style="border-color: ${borderColor}; border-left-width: 3px; background: color-mix(in srgb, ${borderColor} 5%, var(--bg));">
+          <div class="flex items-center gap-2 text-[12px] font-semibold" style="color: ${borderColor};">
+            ${icon}
+            <span>${label}</span>
+          </div>
+          <div class="mt-1 text-[13px]" style="color: var(--text-muted);">
+            ${renderMarkdown(msg.content || '')}
+          </div>
+        </div>
+      </div>
+    `;
   }
   if (result && msg.status !== 'running') {
     _renderCache.set(cacheKey, result);
@@ -1372,7 +1393,7 @@ function renderMessages() {
             <span class="material-symbols-outlined" style="font-size:14px;">psychology_alt</span> Thinking...
           </summary>
           <div class="border-t px-3 py-2" style="border-color: var(--border);">
-            <div class="text-[12px] opacity-70 whitespace-pre-wrap" style="color:var(--text-muted); max-height: 200px; overflow-y: auto;">${escapeHtml(state.thinkingText.slice(-500))}</div>
+            <div class="text-[12px] opacity-70 whitespace-pre-wrap" style="color:var(--text-muted); max-height: 60vh; overflow-y: auto;">${escapeHtml(state.thinkingText)}</div>
           </div>
         </details>
       </div>
@@ -2623,6 +2644,59 @@ window.__desktopReceive = function(message) {
       updateReadOnlyUI();
       break;
     }
+
+    // ─── Command feedback (slash commands dispatched from desktop) ───
+    case "command-result": {
+      const cmd = message.command || "";
+      const cmdMsg = message.message || "";
+      const isSuccess = message.success !== false;
+
+      if (cmdMsg && state.activeView === "threads" && !state.viewingOldThread) {
+        const sysMsg = {
+          role: "system-cmd",
+          command: cmd,
+          content: cmdMsg,
+          success: isSuccess,
+        };
+        state.messages.push(sysMsg);
+        appendMessage(sysMsg);
+      }
+      break;
+    }
+
+    case "clipboard-copy": {
+      // Copy content to clipboard
+      if (message.content && navigator.clipboard) {
+        navigator.clipboard.writeText(message.content).catch(function() {});
+      }
+      break;
+    }
+
+    case "model-changed": {
+      if (message.model) {
+        data.model = message.model;
+        if (modelLabelEl) modelLabelEl.textContent = message.model;
+      }
+      break;
+    }
+
+    case "show-model-selector": {
+      // Show a model picker modal in the desktop UI
+      showModelSelectorModal(message.models || [], message.currentModel);
+      break;
+    }
+
+    case "show-fork-selector": {
+      // Show a fork point picker modal
+      showForkSelectorModal(message.entries || []);
+      break;
+    }
+
+    case "show-session-selector": {
+      // Show a session picker modal for /resume
+      showSessionSelectorModal(message.sessions || [], message.action || "resume");
+      break;
+    }
   }
 };
 
@@ -2667,6 +2741,122 @@ function showPlanModeWarning(toolName, argsPreview) {
     toast.style.transition = "opacity 0.3s";
     setTimeout(() => toast.remove(), 300);
   }, 6000);
+}
+
+// ─── Selector Modals (for slash commands like /model, /fork, /resume) ─────────
+
+function showSelectorModal(title, items, onSelect) {
+  // Remove existing modal
+  var existing = document.getElementById('selector-modal');
+  if (existing) existing.remove();
+
+  var overlay = document.createElement('div');
+  overlay.id = 'selector-modal';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:300;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);animation:fadeIn 0.15s ease-out;';
+  overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
+  var modal = document.createElement('div');
+  modal.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:12px;width:500px;max-width:90vw;max-height:70vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,0.3);';
+
+  var header = document.createElement('div');
+  header.style.cssText = 'padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;';
+  header.innerHTML = '<span style="font-weight:600;font-size:14px;color:var(--text);">' + escapeHtml(title) + '</span><button style="color:var(--text-dim);border:none;background:none;cursor:pointer;" onclick="this.closest(\'#selector-modal\').remove()"><span class="material-symbols-outlined msym-sm">close</span></button>';
+
+  // Search input
+  var searchWrap = document.createElement('div');
+  searchWrap.style.cssText = 'padding:8px 20px;border-bottom:1px solid var(--border);';
+  var searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.placeholder = 'Search...';
+  searchInput.style.cssText = 'width:100%;background:var(--input-bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px;outline:none;';
+  searchWrap.appendChild(searchInput);
+
+  var list = document.createElement('div');
+  list.style.cssText = 'overflow-y:auto;flex:1;padding:8px 0;';
+
+  function renderItems(filter) {
+    var filtered = filter ? items.filter(function(item) {
+      return (item.label || '').toLowerCase().includes(filter) || (item.sublabel || '').toLowerCase().includes(filter);
+    }) : items;
+    list.innerHTML = '';
+    if (filtered.length === 0) {
+      list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-dim);font-size:13px;">No results</div>';
+      return;
+    }
+    filtered.forEach(function(item) {
+      var row = document.createElement('div');
+      row.style.cssText = 'padding:8px 20px;cursor:pointer;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text);transition:background 0.1s;';
+      row.onmouseenter = function() { row.style.background = 'color-mix(in srgb, var(--accent) 8%, var(--bg))'; };
+      row.onmouseleave = function() { row.style.background = ''; };
+      var labelHtml = '<div><div style="font-weight:500;">' + escapeHtml(item.label) + '</div>';
+      if (item.sublabel) labelHtml += '<div style="font-size:11px;color:var(--text-dim);margin-top:1px;">' + escapeHtml(item.sublabel) + '</div>';
+      labelHtml += '</div>';
+      if (item.badge) labelHtml = '<span style="font-size:11px;padding:1px 6px;border-radius:4px;background:var(--accent);color:#fff;margin-right:6px;">' + escapeHtml(item.badge) + '</span>' + labelHtml;
+      if (item.current) labelHtml += '<span style="margin-left:auto;color:var(--accent);"><span class="material-symbols-outlined" style="font-size:14px;">check</span></span>';
+      row.innerHTML = labelHtml;
+      row.onclick = function() {
+        overlay.remove();
+        onSelect(item);
+      };
+      list.appendChild(row);
+    });
+  }
+
+  searchInput.oninput = function() { renderItems(searchInput.value.toLowerCase()); };
+  renderItems('');
+
+  modal.appendChild(header);
+  modal.appendChild(searchWrap);
+  modal.appendChild(list);
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  // Focus search and handle Escape
+  setTimeout(function() { searchInput.focus(); }, 50);
+  overlay.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { overlay.remove(); e.stopPropagation(); }
+  });
+}
+
+function showModelSelectorModal(models, currentModel) {
+  var items = models.map(function(m) {
+    return {
+      label: m.name || m.id,
+      sublabel: m.provider + '/' + m.id + (m.reasoning ? ' (reasoning)' : ''),
+      badge: m.provider,
+      current: m.current === true,
+      data: m,
+    };
+  });
+  showSelectorModal('Select Model', items, function(item) {
+    send({ type: 'model-selected', provider: item.data.provider, modelId: item.data.id });
+  });
+}
+
+function showForkSelectorModal(entries) {
+  var items = entries.map(function(e, idx) {
+    return {
+      label: 'Message #' + (idx + 1),
+      sublabel: e.preview || '(no preview)',
+      data: e,
+    };
+  });
+  showSelectorModal('Fork from message', items, function(item) {
+    send({ type: 'fork-selected', entryId: item.data.id });
+  });
+}
+
+function showSessionSelectorModal(sessions, action) {
+  var items = sessions.map(function(s) {
+    return {
+      label: s.name || '(unnamed)',
+      sublabel: s.date ? timeAgo(s.date) : '',
+      data: s,
+    };
+  });
+  showSelectorModal('Resume Session', items, function(item) {
+    send({ type: 'resume-selected', sessionFile: item.data.file });
+  });
 }
 
 // ─── Streaming UI Updates ─────────────────────────────────────
@@ -2718,7 +2908,7 @@ function updateThinkingMessage() {
   if (thinkDiv) {
     const contentDiv = thinkDiv.querySelector(".whitespace-pre-wrap");
     if (contentDiv) {
-      contentDiv.textContent = state.thinkingText.slice(-500);
+      contentDiv.textContent = state.thinkingText;
       scrollToBottom();
       return;
     }
@@ -2735,7 +2925,7 @@ function updateThinkingMessage() {
           <span class="material-symbols-outlined" style="font-size:14px;">psychology_alt</span> Thinking...
         </summary>
         <div class="border-t px-3 py-2" style="border-color: var(--border);">
-          <div class="text-[12px] opacity-70 whitespace-pre-wrap" style="color:var(--text-muted); max-height: 200px; overflow-y: auto;">${escapeHtml(state.thinkingText.slice(-500))}</div>
+          <div class="text-[12px] opacity-70 whitespace-pre-wrap" style="color:var(--text-muted); max-height: 60vh; overflow-y: auto;">${escapeHtml(state.thinkingText)}</div>
         </div>
       </details>
     `;
