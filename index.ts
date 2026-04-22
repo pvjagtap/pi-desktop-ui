@@ -622,7 +622,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	let sessionReason: string = "startup";
 	let sessionTransitioning = false; // true while a session switch is in progress (prevents window close)
 	let planMode: boolean = false;
-	let pendingDesktopSlashCommand: string | null = null; // slash command waiting to be intercepted by input event
+	let pendingDesktopUserMessage: boolean = false; // true when a user message originated from the desktop UI (suppresses steer-message echo)
 
 	const PLAN_MODE_PREFIX = `[PLAN MODE ACTIVE — You are in read-only plan mode. STRICT RULES:
 1. Do NOT use edit, write, or any tool that modifies files
@@ -681,6 +681,12 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		if (msg.role === "assistant") {
 			sendToWindow({ type: "message-start", role: "assistant" });
 		} else if (msg.role === "user") {
+			// Skip forwarding user messages that originated from the desktop UI
+			// (the frontend already added them locally — forwarding would cause duplicates).
+			if (pendingDesktopUserMessage) {
+				pendingDesktopUserMessage = false;
+				return;
+			}
 			// Forward user messages from steers (e.g. subagent completion)
 			// to the desktop window so they appear in the chat.
 			let text = "";
@@ -850,32 +856,18 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			case "send-message": {
 				const text = (msg.text || "").trim();
 				if (!text || text.length > 100_000) break;
-				const isSlashCommand = text.startsWith("/");
-				if (isSlashCommand) {
-					// Try to dispatch via our built-in/registered command handlers first
-					if (lastCommandCtx) {
-						const ctx = lastCommandCtx;
-						dispatchSlashCommand(text, ctx).then(handled => {
-							if (!handled) {
-								// Not a command we handle directly. Send via sendUserMessage
-								// but set a flag so the input event handler can intercept it
-								// and return { action: "handled" } to prevent LLM processing.
-								// The input event handler will then re-send through sendUserMessage
-								// with the command text as a natural language instruction.
-								pendingDesktopSlashCommand = text;
-								pi.sendUserMessage(text);
-							}
-						}).catch(() => {
-							pendingDesktopSlashCommand = text;
-							pi.sendUserMessage(text);
-						});
-					} else {
-						// No command context yet — use input event interception
-						pendingDesktopSlashCommand = text;
-						pi.sendUserMessage(text);
+				if (text.startsWith("/")) {
+					// Slash command from desktop UI.
+					// 1. Show desktop card for commands we can render natively
+					// 2. ALWAYS inject into terminal so the real command executes there too
+					const ctx = lastCommandCtx;
+					if (ctx) {
+						try { showDesktopCard(text, ctx); } catch {}
 					}
+					injectIntoTerminal(text);
 				} else {
 					const finalText = planMode ? PLAN_MODE_PREFIX + text : text;
+					pendingDesktopUserMessage = true;
 					pi.sendUserMessage(finalText);
 				}
 				break;
@@ -1163,6 +1155,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 				}
 				break;
 			}
+
 		}
 	}
 
@@ -1287,64 +1280,225 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 
 	// ─── Slash Command Dispatch for Desktop UI ───────────────
 	// pi.sendUserMessage() skips slash command dispatch (expandPromptTemplates: false).
-	// We register a hidden command that captures ExtensionCommandContext, and use it
-	// to dispatch slash commands from the desktop UI through the proper pipeline.
+	// We handle commands programmatically via ExtensionCommandContext and ExtensionAPI,
+	// then send results back to the desktop window so the user gets visual feedback.
+	// Commands we can't handle go through the terminal via injectIntoTerminal().
 
-	const registeredCommandHandlers = new Map<string, (args: string, ctx: ExtensionCommandContext) => Promise<void>>();
-
-	/** Dispatch a slash command through the proper context. Returns true if handled. */
-	async function dispatchSlashCommand(text: string, ctx: ExtensionCommandContext): Promise<boolean> {
-		if (!text.startsWith("/")) return false;
-		const spaceIdx = text.indexOf(" ", 1);
-		const cmdName = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
-		const cmdArgs = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1);
-
-		// Try our own registered handlers first
-		const ownHandler = registeredCommandHandlers.get(cmdName);
-		if (ownHandler) {
-			await ownHandler(cmdArgs, ctx);
-			return true;
-		}
-
-		// Try built-in commands that map to ExtensionCommandContext methods
-		switch (cmdName) {
-			case "new":
-				sessionTransitioning = true;
-				await ctx.newSession();
-				sessionTransitioning = false;
-				return true;
-			case "reload":
-				sessionTransitioning = true;
-				await ctx.reload();
-				sessionTransitioning = false;
-				return true;
-			case "compact":
-				ctx.compact(cmdArgs ? { customInstructions: cmdArgs } : undefined);
-				return true;
-			case "quit":
-				ctx.shutdown();
-				return true;
-		}
-
-		return false;
+	/** Send a command result/feedback message to the desktop window. */
+	function sendCommandResult(command: string, opts: { success?: boolean; message?: string }) {
+		sendToWindow({
+			type: "command-result",
+			command,
+			success: opts.success ?? true,
+			message: opts.message || "",
+		});
 	}
 
-	pi.registerCommand("_desktop-exec", {
-		description: "Internal: dispatch slash commands from Desktop UI",
-		handler: async (args, ctx) => {
-			lastCommandCtx = ctx;
-			if (!args) return;
-			const trimmed = args.trim();
-			if (await dispatchSlashCommand(trimmed, ctx)) return;
-			// Fallback: send as regular user message
-			pi.sendUserMessage(trimmed);
-		},
-	});
 
-	// Helper to register a command and also store its handler for desktop dispatch
-	function registerDesktopCommand(name: string, description: string, handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>) {
-		registeredCommandHandlers.set(name, handler);
-		pi.registerCommand(name, { description, handler: async (args, ctx) => { lastCommandCtx = ctx; await handler(args, ctx); } });
+	/** Show a desktop info card for commands we can render natively.
+	 *  Display-only — actual execution always happens via injectIntoTerminal(). */
+	function showDesktopCard(text: string, ctx: ExtensionContext): void {
+		if (!text.startsWith("/")) return;
+		const spaceIdx = text.indexOf(" ", 1);
+		const cmdName = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx);
+		const cmdArgs = spaceIdx === -1 ? "" : text.slice(spaceIdx + 1).trim();
+
+		switch (cmdName) {
+			case "session": {
+				const stats = getTokenStats(ctx);
+				const sessionFile = (ctx.sessionManager as any).getSessionFile?.() ?? "ephemeral";
+				const entryCount = ctx.sessionManager.getEntries().length;
+				const branchLen = ctx.sessionManager.getBranch().length;
+				const model = ctx.model?.id || "no model";
+				const sessionName = pi.getSessionName();
+				const lines = [
+					`**Session Info**`,
+					sessionName ? `Name: ${sessionName}` : null,
+					`Model: ${model}`,
+					`Entries: ${entryCount} (branch: ${branchLen})`,
+					`Input: ${fmt(stats.input)} · Output: ${fmt(stats.output)} · Cache: ${fmt(stats.cache)}`,
+					`Cost: $${stats.cost.toFixed(4)}`,
+					`File: ${basename(sessionFile)}`,
+				].filter(Boolean).join("\n");
+				sendCommandResult("session", { message: lines });
+				break;
+			}
+
+			case "hotkeys": {
+				const shortcuts = [
+					"Ctrl+C — Cancel / clear input",
+					"Ctrl+D — Quit pi",
+					"Ctrl+P — Cycle model",
+					"Ctrl+L — Clear terminal",
+					"Ctrl+Alt+N — Open Desktop window",
+					"Escape — Cancel streaming",
+					"Tab — Accept autocomplete",
+					"Up/Down — History navigation",
+					"Shift+Enter — Newline in editor",
+				];
+				sendCommandResult("hotkeys", { message: "**Keyboard Shortcuts**\n" + shortcuts.join("\n") });
+				break;
+			}
+
+			case "context": {
+				const usage = ctx.getContextUsage();
+				const model = ctx.model;
+				if (!usage || !model) {
+					sendCommandResult("context", { success: false, message: "No context usage data available. Send a message first." });
+					break;
+				}
+				const contextWindow = usage.contextWindow;
+				const usedTokens = usage.tokens;
+				const maxOutputTokens = model.maxTokens || 0;
+				let systemToolsTokens = 0, messageTokens = 0;
+				const entries = ctx.sessionManager.getBranch();
+				let lastUsage: any = null;
+				for (let i = entries.length - 1; i >= 0; i--) {
+					const entry = entries[i];
+					if (entry.type === "message" && entry.message.role === "assistant") {
+						const a = entry.message as any;
+						if (a.stopReason !== "aborted" && a.stopReason !== "error" && a.usage) { lastUsage = a.usage; break; }
+					}
+				}
+				if (lastUsage && usedTokens !== null) {
+					const cacheTokens = (lastUsage.cacheRead || 0) + (lastUsage.cacheWrite || 0);
+					if (cacheTokens > 0) { systemToolsTokens = cacheTokens; messageTokens = Math.max(0, usedTokens - cacheTokens); }
+					else { systemToolsTokens = Math.round(usedTokens * 0.15); messageTokens = usedTokens - systemToolsTokens; }
+				} else if (usedTokens !== null) {
+					systemToolsTokens = Math.round(usedTokens * 0.15); messageTokens = usedTokens - systemToolsTokens;
+				}
+				const bufferTokens = maxOutputTokens;
+				const freeTokens = usedTokens !== null ? Math.max(0, contextWindow - usedTokens - bufferTokens) : contextWindow - bufferTokens;
+				const pct = (n: number) => contextWindow > 0 ? ((n / contextWindow) * 100).toFixed(0) : "0";
+				const modelName = model.id || (model as any).name || "unknown";
+				const percentStr = usage.percent !== null ? `${Math.round(usage.percent!)}%` : "?%";
+				const usedStr = usedTokens !== null ? fmt(usedTokens) : "?";
+				sendCommandResult("context", { message: [
+					`**Context Usage**`, ``,
+					`${modelName}  ·  ${usedStr} / ${fmt(contextWindow)} tokens (${percentStr})`, ``,
+					`◍ System/Tools: ${fmt(systemToolsTokens).padStart(7)} (${pct(systemToolsTokens)}%)`,
+					`● Messages:     ${fmt(messageTokens).padStart(7)} (${pct(messageTokens)}%)`,
+					`· Free Space:   ${fmt(Math.max(0, freeTokens)).padStart(7)} (${pct(Math.max(0, freeTokens))}%)`,
+					`○ Buffer:       ${fmt(bufferTokens).padStart(7)} (${pct(bufferTokens)}%)`,
+				].join("\n") });
+				break;
+			}
+
+			case "cost": {
+				const days = cmdArgs ? parseInt(cmdArgs, 10) : 7;
+				if (isNaN(days) || days < 1) { sendCommandResult("cost", { success: false, message: "Usage: /cost [days]" }); break; }
+				const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+				const cutoffStr = cutoff.toISOString().slice(0, 10);
+				const home = process.env.HOME || process.env.USERPROFILE || "";
+				const sessionsDir = join(home, ".pi", "agent", "sessions");
+				const tmpDir = process.env.TMPDIR || (process.platform === "win32" ? process.env.TEMP || "C:\Temp" : "/tmp");
+				let mainCost = 0, subCost = 0, mainSessions = 0, subSessions = 0;
+				const walkJsonl = (dir: string): string[] => {
+					const files: string[] = [];
+					try { if (!existsSync(dir)) return files; const walk = (d: string) => { for (const e of readdirSync(d, { withFileTypes: true })) { const full = join(d, e.name); if (e.isDirectory()) walk(full); else if (e.name.endsWith(".jsonl") && e.name.slice(0, 10) >= cutoffStr) files.push(full); } }; walk(dir); } catch {}
+					return files;
+				};
+				const extractCost = (fp: string): number => {
+					let cost = 0;
+					try { for (const line of readFileSync(fp, "utf-8").split("\n")) { if (!line.includes('"cost"')) continue; try { const e = JSON.parse(line); if (e?.message?.usage?.cost?.total) cost += e.message.usage.cost.total; } catch {} } } catch {}
+					return cost;
+				};
+				for (const f of walkJsonl(sessionsDir)) { const c = extractCost(f); if (c > 0) { mainCost += c; mainSessions++; } }
+				const subDirs: string[] = [];
+				try { for (const e of readdirSync(tmpDir, { withFileTypes: true })) { if (e.isDirectory() && e.name.startsWith("pi-subagent-session-")) subDirs.push(join(tmpDir, e.name)); } } catch {}
+				for (const d of subDirs) { for (const f of walkJsonl(d)) { const c = extractCost(f); if (c > 0) { subCost += c; subSessions++; } } }
+				sendCommandResult("cost", { message: [
+					`**Cost Summary** (last ${days} days)`, ``,
+					`💰 Total: $${(mainCost + subCost).toFixed(2)}  (${mainSessions + subSessions} sessions)`,
+					`   Main: $${mainCost.toFixed(2)} (${mainSessions})  ·  Subagents: $${subCost.toFixed(2)} (${subSessions})`,
+				].join("\n") });
+				break;
+			}
+
+			case "changelog": {
+				try {
+					const candidates = [
+						join(__dirname, "node_modules", "@mariozechner", "pi-coding-agent", "CHANGELOG.md"),
+						join(process.env.HOME || process.env.USERPROFILE || "", "AppData", "Roaming", "npm", "node_modules", "@mariozechner", "pi-coding-agent", "CHANGELOG.md"),
+						join("/usr", "local", "lib", "node_modules", "@mariozechner", "pi-coding-agent", "CHANGELOG.md"),
+					];
+					const clPath = candidates.find(p => existsSync(p));
+					if (clPath) {
+						// Parse entries the same way pi does: split on ## headers, reverse (newest first)
+						const content = readFileSync(clPath, "utf-8");
+						const lines = content.split("\n");
+						const entries: { content: string }[] = [];
+						let currentLines: string[] = [];
+						let inEntry = false;
+						for (const line of lines) {
+							if (line.startsWith("## ")) {
+								if (inEntry && currentLines.length > 0) {
+									entries.push({ content: currentLines.join("\n").trim() });
+								}
+								currentLines = [line];
+								inEntry = true;
+							} else if (inEntry) {
+								currentLines.push(line);
+							}
+						}
+						if (inEntry && currentLines.length > 0) entries.push({ content: currentLines.join("\n").trim() });
+						if (entries.length > 0) {
+							const md = "**What's New**\n\n" + entries.reverse().map(e => e.content).join("\n\n");
+							sendCommandResult("changelog", { message: md });
+						} else {
+							sendCommandResult("changelog", { success: false, message: "No changelog entries found." });
+						}
+					} else {
+						sendCommandResult("changelog", { success: false, message: "CHANGELOG.md not found." });
+					}
+				} catch { sendCommandResult("changelog", { success: false, message: "Could not read changelog." }); }
+				break;
+			}
+
+			case "tree": {
+				// Show session tree structure in desktop
+				try {
+					const roots = (ctx.sessionManager as any).getTree?.() as Array<{ entry: any; children: any[]; label?: string }> | undefined;
+					const leafId = ctx.sessionManager.getLeafId();
+					if (!roots || roots.length === 0) {
+						sendCommandResult("tree", { message: "Session tree is empty." });
+						break;
+					}
+					const lines: string[] = ["**Session Tree**", ""];
+					const renderNode = (node: any, prefix: string, isLast: boolean) => {
+						const e = node.entry;
+						const isLeaf = e.id === leafId;
+						let desc = "";
+						if (e.type === "message") {
+							const role = e.message?.role || "?";
+							let text = "";
+							if (Array.isArray(e.message?.content)) {
+								for (const b of e.message.content) { if (b.type === "text") text += b.text; }
+							} else if (typeof e.message?.content === "string") { text = e.message.content; }
+							text = text.slice(0, 60).replace(/\n/g, " ").trim();
+							desc = `${role}: ${text || "..."}` ;
+						} else if (e.type === "compaction") {
+							desc = "[compaction]";
+						} else {
+							desc = `[${e.type}]`;
+						}
+						if (node.label) desc += ` 🏷️ ${node.label}`;
+						const marker = isLeaf ? "◉ " : "○ ";
+						const connector = prefix ? (isLast ? "└─ " : "├─ ") : "";
+						lines.push(`${prefix}${connector}${marker}${desc}`);
+						const childPrefix = prefix + (prefix ? (isLast ? "   " : "│  ") : "");
+						for (let i = 0; i < node.children.length; i++) {
+							renderNode(node.children[i], childPrefix, i === node.children.length - 1);
+						}
+					};
+					for (let i = 0; i < roots.length; i++) {
+						renderNode(roots[i], "", i === roots.length - 1);
+					}
+					sendCommandResult("tree", { message: lines.join("\n") });
+				} catch { sendCommandResult("tree", { success: false, message: "Could not build session tree." }); }
+				break;
+			}
+		}
 	}
 
 	// ─── Keyboard Shortcut ────────────────────────────────────
@@ -1356,37 +1510,52 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	// ─── Input Event: Intercept Slash Commands from Desktop UI ───
-	// pi.sendUserMessage() uses expandPromptTemplates: false, which skips slash command
-	// dispatch and prompt template expansion. The input event fires BEFORE the text
-	// reaches the LLM, so we can intercept and transform slash commands into natural
-	// language instructions that the LLM can act on properly.
+	let pendingTerminalCmd: string | null = null;
 
-	pi.on("input", (event, ctx) => {
-		if (pendingDesktopSlashCommand && event.text === pendingDesktopSlashCommand) {
-			const cmd = pendingDesktopSlashCommand;
-			pendingDesktopSlashCommand = null;
-
-			// Mark session-lifecycle commands so session_shutdown doesn't close the window
-			const lcCmd = cmd.replace(/^\//,"").split(/\s/)[0];
-			if (lcCmd === "new" || lcCmd === "reload" || lcCmd === "resume") {
-				sessionTransitioning = true;
+	/** Inject a slash command into the terminal by routing through sendUserMessage → input event.
+	 *  The input event intercepts the text, sets it in the terminal editor, and simulates Enter.
+	 *  The terminal then processes it through its normal pipeline with expandPromptTemplates: true. */
+	function injectIntoTerminal(cmd: string): void {
+		const lcCmd = cmd.replace(/^\//,"").split(/\s/)[0];
+		if (lcCmd === "new" || lcCmd === "reload" || lcCmd === "resume" || lcCmd === "fork") {
+			sessionTransitioning = true;
+		}
+		pendingTerminalCmd = cmd;
+		pendingDesktopUserMessage = true;
+		try {
+			pi.sendUserMessage(cmd);
+		} catch (err) {
+			// sendUserMessage may fail if agent is busy. Fall back to direct injection.
+			pendingTerminalCmd = null;
+			if (lastCtx?.hasUI) {
+				lastCtx.ui.setEditorText(cmd);
+				setImmediate(() => {
+					setTimeout(() => {
+						try { process.stdin.emit("data", "\r"); } catch {}
+					}, 100);
+				});
 			}
+		}
+	}
 
-			// Execute the slash command by injecting it into the terminal's input pipeline.
-			// We set the editor text to the command, then simulate an Enter keypress via
-			// process.stdin. The TUI processes this as a normal terminal submission, which
-			// calls session.prompt() with expandPromptTemplates: true — the proper path
-			// that dispatches extension commands, skill commands, and prompt templates.
+	// Intercept sendUserMessage calls for terminal-bound slash commands.
+	pi.on("input", (event, ctx) => {
+		if (pendingTerminalCmd && event.text === pendingTerminalCmd) {
+			const cmd = pendingTerminalCmd;
+			pendingTerminalCmd = null;
 			if (ctx.hasUI) {
 				ctx.ui.setEditorText(cmd);
-				// Schedule Enter keypress after current prompt() call returns
-				setTimeout(() => {
-					try { process.stdin.emit("data", String.fromCharCode(13)); } catch {}
-				}, 50);
+				// Use setImmediate to ensure the prompt() call fully returns
+				// before we inject the Enter keystroke into stdin.
+				setImmediate(() => {
+					setTimeout(() => {
+						try {
+							// Emit carriage return on stdin to trigger the TUI's input handler
+							process.stdin.emit("data", "\r");
+						} catch {}
+					}, 100);
+				});
 			}
-
-			// Prevent the current sendUserMessage call from reaching the LLM
 			return { action: "handled" as const };
 		}
 	});
