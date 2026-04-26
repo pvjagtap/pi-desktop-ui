@@ -139,6 +139,7 @@ function fmt(n: number): string {
 
 function getTokenStats(ctx: ExtensionContext) {
 	let input = 0, output = 0, cost = 0, cache = 0;
+	try {
 	for (const e of ctx.sessionManager.getBranch()) {
 		if (e.type === "message" && e.message.role === "assistant") {
 			const m = e.message as AssistantMessage;
@@ -148,6 +149,7 @@ function getTokenStats(ctx: ExtensionContext) {
 			cache += (m.usage as any).cacheRead ?? 0;
 		}
 	}
+	} catch { return { input, output, cost, cache }; }
 	return { input, output, cost, cache };
 }
 
