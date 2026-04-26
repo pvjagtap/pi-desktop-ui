@@ -1,6 +1,6 @@
 # Pi Desktop UI
 
-A native desktop GUI for [pi](https://github.com/mariozechner/pi-coding-agent) — a fully functional chat window that mirrors your terminal session with real-time streaming, markdown rendering, and workspace management.
+A native desktop GUI for [pi](https://github.com/badlogic/pi-mono) — a fully functional chat window that mirrors your terminal session with real-time streaming, markdown rendering, and workspace management.
 
 ![Pi Desktop - Chat View](assets/Screenshot_5.png)
 

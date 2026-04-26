@@ -52,20 +52,20 @@
   }
 
   [data-theme="dark"] {
-    --bg: #1a1714;
-    --sidebar-bg: #141210;
-    --sidebar-hover: #221f1b;
-    --sidebar-active: #2a2622;
-    --text: #f7f4f0;
-    --text-muted: #bfb8b0;
-    --text-dim: #a09890;
-    --accent: #c4956a;
-    --border: #96794e;
-    --card-bg: #1f1c18;
-    --input-bg: #1a1714;
-    --code-bg: #252220;
-    --user-bubble: #2a2622;
-    --breadcrumb-badge: #2a2622;
+    --bg: #0d1117;
+    --sidebar-bg: #010409;
+    --sidebar-hover: #161b22;
+    --sidebar-active: #1c2128;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --text-dim: #6e7681;
+    --accent: #f5a623;
+    --border: #8b5e34;
+    --card-bg: #161b22;
+    --input-bg: #0d1117;
+    --code-bg: #161b22;
+    --user-bubble: #1c2128;
+    --breadcrumb-badge: #1c2128;
   }
 
   html, body { width: 100%; height: 100%; overflow: hidden; margin: 0; }
@@ -210,7 +210,7 @@
     color: var(--text);
   }
   .input-area textarea::placeholder { color: var(--text-dim); }
-  .input-area > div:first-child {
+  .input-area .rounded-xl {
     box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent), 0 0 20px color-mix(in srgb, var(--accent) 15%, transparent);
     border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
   }
