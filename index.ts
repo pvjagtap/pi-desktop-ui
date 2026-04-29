@@ -444,7 +444,9 @@ function searchSessionThreads(sessionDir: string | null, query: string): Array<{
 }
 
 function extractSessionMessages(ctx: ExtensionContext) {
-	const messages: Array<{ role: string; content: string; toolName?: string }> = [];
+	const messages: Array<{ role: string; content: string; toolName?: string; images?: Array<{ data: string; mimeType: string }> }> = [];
+	// Buffer images from toolResult entries to attach to the next assistant message
+	let pendingImages: Array<{ data: string; mimeType: string }> = [];
 
 	for (const e of ctx.sessionManager.getBranch()) {
 		if (e.type === "compaction") {
@@ -465,7 +467,18 @@ function extractSessionMessages(ctx: ExtensionContext) {
 		}
 		if (e.type !== "message") continue;
 		const msg = e.message;
-		if (msg.role === "user") {
+		if ((msg.role as string) === "toolResult") {
+			// Extract image blocks from tool results
+			if (Array.isArray(msg.content)) {
+				for (const block of msg.content) {
+					if ((block as any).type === "image" && (block as any).data) {
+						pendingImages.push({ data: (block as any).data, mimeType: (block as any).mimeType || "image/png" });
+					}
+				}
+			}
+			// Cap at 5 images per tool result to avoid bloating
+			if (pendingImages.length > 5) pendingImages = pendingImages.slice(-5);
+		} else if (msg.role === "user") {
 			let text = "";
 			if (Array.isArray(msg.content)) {
 				for (const block of msg.content) {
@@ -490,14 +503,23 @@ function extractSessionMessages(ctx: ExtensionContext) {
 			}
 			// Add tool calls before the text response
 			messages.push(...toolCalls);
-			if (text.trim()) messages.push({ role: "assistant", content: text.trim() });
+			if (text.trim()) {
+				const assistMsg: typeof messages[0] = { role: "assistant", content: text.trim() };
+				// Attach buffered images from preceding toolResult
+				if (pendingImages.length > 0) {
+					assistMsg.images = pendingImages;
+					pendingImages = [];
+				}
+				messages.push(assistMsg);
+			}
 		}
 	}
 	return messages;
 }
 
 function extractThreadMessages(filePath: string) {
-	const messages: Array<{ role: string; content: string; toolName?: string }> = [];
+	const messages: Array<{ role: string; content: string; toolName?: string; images?: Array<{ data: string; mimeType: string }> }> = [];
+	let pendingImages: Array<{ data: string; mimeType: string }> = [];
 	try {
 		const content = readFileSync(filePath, "utf-8");
 		for (const line of content.split("\n")) {
@@ -517,7 +539,17 @@ function extractThreadMessages(filePath: string) {
 				}
 				if (entry.type !== "message") continue;
 				const msg = entry.message;
-				if (msg?.role === "user") {
+				if (msg?.role === "toolResult") {
+					// Extract image blocks from tool results
+					if (Array.isArray(msg.content)) {
+						for (const block of msg.content) {
+							if (block.type === "image" && block.data) {
+								pendingImages.push({ data: block.data, mimeType: block.mimeType || "image/png" });
+							}
+						}
+					}
+					if (pendingImages.length > 5) pendingImages = pendingImages.slice(-5);
+				} else if (msg?.role === "user") {
 					let text = "";
 					if (Array.isArray(msg.content)) {
 						for (const block of msg.content) {
@@ -537,7 +569,14 @@ function extractThreadMessages(filePath: string) {
 						}
 					} else if (typeof msg.content === "string") text = msg.content;
 					messages.push(...toolCalls);
-					if (text.trim()) messages.push({ role: "assistant", content: text.trim() });
+					if (text.trim()) {
+						const assistMsg: typeof messages[0] = { role: "assistant", content: text.trim() };
+						if (pendingImages.length > 0) {
+							assistMsg.images = pendingImages;
+							pendingImages = [];
+						}
+						messages.push(assistMsg);
+					}
 				}
 			} catch {}
 		}
@@ -589,7 +628,7 @@ interface DesktopWindowData {
 	skills: Array<{ name: string; desc: string }>;
 	extensions: Array<{ name: string; source: string; type: string }>;
 	workspaces: Array<{ name: string; path: string; dirName: string; sessionCount: number; lastActive: string }>;
-	messages: Array<{ role: string; content: string; toolName?: string }>;
+	messages: Array<{ role: string; content: string; toolName?: string; images?: Array<{ data: string; mimeType: string }> }>;
 	explorerFiles: Array<{ name: string; isDir: boolean; size: string; path: string }>;
 	commands: Array<{ name: string; description: string; source: string; scope: string; path: string }>;
 	hiddenWorkspaces: Record<string, boolean>;
