@@ -625,6 +625,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	let sessionTransitioning = false; // true while a session switch is in progress (prevents window close)
 	let planMode: boolean = false;
 	let pendingDesktopUserMessage: boolean = false; // true when a user message originated from the desktop UI (suppresses steer-message echo)
+	let pendingResponseImages: Array<{ data: string; mimeType: string }> = []; // images from tool results to attach to next assistant response
 
 	const PLAN_MODE_PREFIX = `[PLAN MODE ACTIVE — You are in read-only plan mode. STRICT RULES:
 1. Do NOT use edit, write, or any tool that modifies files
@@ -668,6 +669,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	// ─── Streaming Event Handlers (global) ────────────────────
 
 	pi.on("agent_start", (_event, _ctx) => {
+		pendingResponseImages = []; // clear any stale images from previous turn
 		sendToWindow({ type: "agent-start" });
 	});
 
@@ -745,7 +747,9 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 					if ((block as any).type === "text") text += (block as any).text;
 				}
 			}
-			sendToWindow({ type: "message-end", role: "assistant", content: text });
+			// Attach any buffered images from tool results to the assistant response
+			const images = pendingResponseImages.length > 0 ? pendingResponseImages.splice(0) : undefined;
+			sendToWindow({ type: "message-end", role: "assistant", content: text, images });
 		}
 	});
 
@@ -824,8 +828,9 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 	}) as any);
 
 	pi.on("tool_execution_end", (event, _ctx) => {
-		// Extract result text
+		// Extract result text and images
 		let resultText = "";
+		let resultImages: Array<{ data: string; mimeType: string }> = [];
 		try {
 			const result = event.result;
 			if (typeof result === "string") {
@@ -837,6 +842,15 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 						.filter((c: any) => c.type === "text")
 						.map((c: any) => c.text)
 						.join("\n");
+					// Extract image content blocks
+					for (const block of result.content) {
+						if ((block as any).type === "image" && (block as any).data) {
+							resultImages.push({
+								data: (block as any).data,
+								mimeType: (block as any).mimeType || "image/png",
+							});
+						}
+					}
 				} else if (typeof result.content === "string") {
 					resultText = result.content;
 				}
@@ -845,12 +859,18 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			}
 		} catch { resultText = "(result unavailable)"; }
 
+		// Buffer images for the next assistant response
+		if (resultImages.length > 0) {
+			pendingResponseImages.push(...resultImages.slice(0, 5));
+		}
+
 		sendToWindow({
 			type: "tool-end",
 			toolName: event.toolName,
 			toolCallId: event.toolCallId,
 			isError: event.isError,
 			resultText: resultText.slice(0, 3000),
+			resultImages: resultImages.slice(0, 5),
 		});
 	});
 

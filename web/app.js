@@ -1035,10 +1035,24 @@ function renderMessageHtml(msg) {
       </div>
     `;
   } else if (msg.role === "assistant") {
+    // Render inline images from tool results below the response
+    let imagesHtml = '';
+    if (msg.images && Array.isArray(msg.images) && msg.images.length > 0) {
+      let imgTags = '';
+      for (const img of msg.images) {
+        if (img.data && img.mimeType) {
+          imgTags += `<img src="data:${escapeHtml(img.mimeType)};base64,${img.data}" style="max-width:100%;max-height:500px;border-radius:8px;margin:8px 0;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.2);" onclick="window.open(this.src,'_blank')" />`;
+        }
+      }
+      if (imgTags) {
+        imagesHtml = `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:10px;">${imgTags}</div>`;
+      }
+    }
     result = `
       <div class="msg-animate mb-5">
         <div class="message-content text-[14.5px] leading-relaxed" style="color:var(--text);">
           ${renderMarkdown(msg.content)}
+          ${imagesHtml}
         </div>
       </div>
     `;
@@ -1103,6 +1117,23 @@ function renderMessageHtml(msg) {
           <pre class="text-[12px] whitespace-pre-wrap overflow-x-auto" style="color:var(--text-muted); max-height: 300px; overflow-y: auto;"><code>${escapeHtml(msg.resultText)}</code></pre>
         </div>
       `;
+    }
+    // Render inline images from tool results
+    if (msg.resultImages && Array.isArray(msg.resultImages) && msg.resultImages.length > 0 && !isRunning) {
+      let imagesHtml = '';
+      for (const img of msg.resultImages) {
+        if (img.data && img.mimeType) {
+          imagesHtml += `<img src="data:${escapeHtml(img.mimeType)};base64,${img.data}" style="max-width:100%;max-height:400px;border-radius:6px;margin:6px 0;cursor:pointer;" onclick="window.open(this.src,'_blank')" />`;
+        }
+      }
+      if (imagesHtml) {
+        detailsHtml += `
+          <div class="border-t px-3 py-2" style="border-color: var(--border);">
+            <div class="text-[11px] font-semibold mb-1" style="color: var(--text-muted);">Images</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">${imagesHtml}</div>
+          </div>
+        `;
+      }
     }
 
     result = `
@@ -2411,7 +2442,7 @@ window.__desktopReceive = function(message) {
 
     case "message-end":
       if (message.role === "assistant" && message.content) {
-        const assistMsg = { role: "assistant", content: message.content };
+        const assistMsg = { role: "assistant", content: message.content, images: message.images || null };
         state.messages.push(assistMsg);
         state.streamingText = "";
         state.thinkingText = "";
@@ -2462,6 +2493,7 @@ window.__desktopReceive = function(message) {
           status: "done",
           isError: message.isError,
           resultText: message.resultText || "",
+          resultImages: message.resultImages || [],
         });
       } else {
         const toolMsg2 = {
@@ -2470,6 +2502,7 @@ window.__desktopReceive = function(message) {
           toolCallId: message.toolCallId,
           argsDisplay: "",
           resultText: message.resultText || "",
+          resultImages: message.resultImages || [],
           status: "done",
           isError: message.isError,
         };
