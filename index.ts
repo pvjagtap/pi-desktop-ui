@@ -870,7 +870,12 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 				} else {
 					const finalText = planMode ? PLAN_MODE_PREFIX + text : text;
 					pendingDesktopUserMessage = true;
-					pi.sendUserMessage(finalText);
+					try {
+						pi.sendUserMessage(finalText);
+					} catch (err) {
+						pendingDesktopUserMessage = false;
+						sendToWindow({ type: "command-result", command: "send-message", success: false, message: "Session context expired — please resend your message." });
+					}
 				}
 				break;
 			}
@@ -1583,9 +1588,18 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 
 		// Notify desktop window of session change with reason context
 		if (reason !== "startup" || activeWindow) {
-			// Re-attach message handler if we adopted a window from a previous extension instance
-			if (reason === "startup" && activeWindow) {
-				activeWindow.on("message", handleWindowMessage);
+			// Re-attach event handlers whenever we adopt a window from a previous extension instance.
+			// This covers reload, new, resume, fork, AND startup-with-surviving-window.
+			// Remove ALL old listeners first — the previous instance's handlers captured a
+			// now-stale `pi` reference that throws "stale extension ctx" on use.
+			if (activeWindow) {
+				const adoptedWin = activeWindow;
+				adoptedWin.removeAllListeners("message");
+				adoptedWin.removeAllListeners("closed");
+				adoptedWin.removeAllListeners("error");
+				adoptedWin.on("message", handleWindowMessage);
+				adoptedWin.on("closed", () => { if (activeWindow === adoptedWin) setActiveWindow(null); });
+				adoptedWin.on("error", () => { if (activeWindow === adoptedWin) setActiveWindow(null); });
 				try { ctx.ui.setHiddenThinkingLabel?.("thinking (visible in Desktop ◈)"); } catch {}
 			}
 			const messages = extractSessionMessages(ctx);
