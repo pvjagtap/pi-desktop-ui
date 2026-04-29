@@ -805,6 +805,15 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		});
 	});
 
+	pi.on("model_select", (event, _ctx) => {
+		// Update desktop window immediately when user switches model (Ctrl+P, /model)
+		sendToWindow({
+			type: "provider-request",
+			model: event.model?.id ?? "",
+			provider: (event.model as any)?.provider ?? "",
+		});
+	});
+
 	pi.on("before_provider_request", ((event: any, _ctx: ExtensionContext) => {
 		// Forward provider request metadata to desktop window for real-time model/provider display
 		sendToWindow({
