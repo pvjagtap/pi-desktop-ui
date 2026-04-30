@@ -643,7 +643,17 @@ function buildDesktopHtml(data: DesktopWindowData): string {
 	// and \uXXXX escapes during transfer. Base64 is pure alphanumeric + /+= and
 	// survives any encoding conversion.
 	const rawJson = JSON.stringify(data);
-	const base64Json = Buffer.from(rawJson, 'utf8').toString('base64');
+	let base64Json = Buffer.from(rawJson, 'utf8').toString('base64');
+
+	// Safety: WebView2 NavigateToString has a hard 2MB limit.
+	// If the full HTML would exceed it, strip messages from data and retry.
+	const staticSize = templateHtml.length + appJs.length - "__INLINE_DATA__".length - "__INLINE_JS__".length;
+	const MAX_HTML_SIZE = 1_900_000; // leave 100KB headroom under 2MB
+	if (staticSize + base64Json.length > MAX_HTML_SIZE) {
+		data.messages = data.messages.slice(-10);
+		const fallbackJson = JSON.stringify(data);
+		base64Json = Buffer.from(fallbackJson, 'utf8').toString('base64');
+	}
 
 	// Use split+join instead of .replace() to avoid $-pattern interpretation
 	let result = templateHtml.split("__INLINE_DATA__").join(base64Json);
@@ -817,11 +827,16 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 				argsDisplay = `read ${args.path}` + (args.offset ? ` (offset: ${args.offset})` : "");
 			} else if (event.toolName === "edit" && args?.path) {
 				editPath = args.path;
-				editDiffs = (args.edits || []).map((e: any) => ({
+				// Handle both formats: edits[] array (normal) and legacy top-level oldText/newText
+				let edits: Array<{oldText: string; newText: string}> = Array.isArray(args.edits) ? args.edits : [];
+				if (edits.length === 0 && typeof args.oldText === "string" && typeof args.newText === "string") {
+					edits = [{ oldText: args.oldText, newText: args.newText }];
+				}
+				editDiffs = edits.map((e: any) => ({
 					oldText: e.oldText || "",
 					newText: e.newText || "",
 				}));
-				argsDisplay = `edit ${args.path} (${(args.edits || []).length} edit(s))`;
+				argsDisplay = `edit ${args.path} (${edits.length} edit(s))`;
 			} else if (event.toolName === "write" && args?.path) {
 				argsDisplay = `write ${args.path}`;
 			} else if (event.toolName === "grep" && args?.pattern) {
@@ -1250,7 +1265,24 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		const allWorkspaces = getWorkspaces().map(w => ({
 			...w, lastActive: w.lastActive.toISOString(),
 		}));
-		const messages = extractSessionMessages(ctx);
+		// Cap initial messages to prevent WebView2 NavigateToString 2MB limit crash.
+		// The 2MB limit applies to the full HTML (template + app.js + base64 data).
+		// Budget: ~1.2MB for message JSON (after base64 inflate ≈ 1.6MB, plus ~155KB static).
+		const MAX_MSG_CHARS = 8000; // truncate individual message content
+		const MAX_JSON_BYTES = 1_200_000; // total budget for messages JSON
+		const allMessages = extractSessionMessages(ctx);
+		let messages = allMessages.slice(-50).map(m => ({
+			...m,
+			// Strip images from initial load — they bloat base64 payload massively
+			images: undefined,
+			content: m.content.length > MAX_MSG_CHARS
+				? m.content.slice(0, MAX_MSG_CHARS) + "\n…(truncated)"
+				: m.content,
+		}));
+		// If still too large, progressively drop oldest messages
+		while (messages.length > 5 && JSON.stringify(messages).length > MAX_JSON_BYTES) {
+			messages = messages.slice(Math.ceil(messages.length * 0.25));
+		}
 		const explorerFiles = getDirEntries(ctx.cwd);
 		const commands = getAllCommands(pi);
 
