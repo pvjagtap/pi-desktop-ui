@@ -93,7 +93,7 @@ The extension implements multiple layers of defense:
 
 ## Requirements
 
-- [pi](https://github.com/mariozechner/pi-coding-agent) coding agent
+- [pi](https://github.com/earendil-works/pi-coding-agent) coding agent (v0.75+)
 - The [glimpse](https://github.com/nickarrow/glimpseui) skill/package must be available (provides the `glimpseui` module)
 
 ## How It Works

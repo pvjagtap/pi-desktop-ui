@@ -16,9 +16,9 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { exec, spawn } from "node:child_process";
-import type { AssistantMessage } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Key, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { open } from "glimpseui";
 
 type GlimpseWindow = ReturnType<typeof open>;
@@ -1525,6 +1525,10 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 			case "changelog": {
 				try {
 					const candidates = [
+						join(__dirname, "node_modules", "@earendil-works", "pi-coding-agent", "CHANGELOG.md"),
+						join(process.env.HOME || process.env.USERPROFILE || "", "AppData", "Roaming", "npm", "node_modules", "@earendil-works", "pi-coding-agent", "CHANGELOG.md"),
+						join("/usr", "local", "lib", "node_modules", "@earendil-works", "pi-coding-agent", "CHANGELOG.md"),
+						// Legacy paths
 						join(__dirname, "node_modules", "@mariozechner", "pi-coding-agent", "CHANGELOG.md"),
 						join(process.env.HOME || process.env.USERPROFILE || "", "AppData", "Roaming", "npm", "node_modules", "@mariozechner", "pi-coding-agent", "CHANGELOG.md"),
 						join("/usr", "local", "lib", "node_modules", "@mariozechner", "pi-coding-agent", "CHANGELOG.md"),
@@ -1684,7 +1688,7 @@ export default function desktopTuiExtension(pi: ExtensionAPI) {
 		lastCtx = ctx;
 		enableFooter(ctx);
 		enableWidget(ctx);
-		ctx.ui.setStatus("desktop", ctx.ui.theme.fg("dim", "◈ Desktop"));
+		try { ctx.ui.setStatus("desktop", ctx.ui.theme.fg("dim", "◈ Desktop")); } catch { ctx.ui.setStatus("desktop", "◈ Desktop"); }
 
 		// Notify desktop window of session change with reason context
 		if (reason !== "startup" || activeWindow) {
